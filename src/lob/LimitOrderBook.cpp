@@ -130,7 +130,46 @@ void LimitOrderBook::remove_price_level(Side side) {
     }
 }
 
-void add_price_level(Side side, int64_t price, int64_t quantity);
+void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id) {
+    Order order{order_id, price, quantity, side};
+    int64_t global_index = price & MASK_MODULO;
+    int64_t word_index = global_index / 64;
+    int64_t bit_index = global_index % 64;
+    
+    if (side == SELL) {
+        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
+            ask_ladder[global_index].orders.push_back(order); 
+            ask_ladder[global_index].quantity += quantity;
+            ask_ladder[global_index].price = price;
+            ask_bitmask[word_index] |= 1ULL << bit_index;
+        } else {
+            PriceLevel& price_level = ask_overflow[price];
+            price_level.orders.push_back(order);
+            price_level.quantity += quantity;
+            price_level.price = price;
+        }
+
+        if (price < best_ask) {
+            best_ask = price;
+        }
+    } else {
+        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
+            bid_ladder[global_index].orders.push_back(order);
+            bid_ladder[global_index].quantity += quantity;
+            bid_ladder[global_index].price = price;
+            bid_bitmask[word_index] |= 1ULL << bit_index;
+        } else {
+            PriceLevel& price_level = bid_overflow[price];
+            price_level.orders.push_back(order);
+            price_level.quantity += quantity;
+            price_level.price = price;
+        }
+
+        if (price > best_bid) {
+            best_bid = price;
+        }
+    }
+}
 
 
 OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t quantity) {
@@ -138,6 +177,8 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
         int64_t liquidity = available_liquidity(side, price);
         if (liquidity < quantity) {return -1;}
     }
+
+    OrderID order_id = generate_order_id();
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
@@ -167,8 +208,10 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
     }
 
     if (remaining_quantity && type == LIMIT) {
-        add_price_level(side, price, remaining_quantity);
+        add_price_level(side, price, remaining_quantity, order_id);
     }
+
+    return order_id;
 }
 
 

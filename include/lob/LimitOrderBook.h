@@ -30,6 +30,8 @@ class LimitOrderBook {
 
     void remove_price_level(Side side);
 
+    void add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id);
+
     public:
         OrderID submit(Side side, OrderType type, int64_t price, int64_t quantity);
 
