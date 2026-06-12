@@ -26,11 +26,15 @@ class LimitOrderBook {
     std::map<int64_t, PriceLevel, std::greater<int64_t>> bid_overflow;
     std::map<int64_t, PriceLevel> ask_overflow;
 
+    int64_t next_order_id = 1;
+
     PriceLevel& get_price_level(Side side);
 
     void remove_price_level(Side side);
 
     void add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id);
+
+    OrderID generate_order_id(Side side, int64_t price);
 
     public:
         OrderID submit(Side side, OrderType type, int64_t price, int64_t quantity);

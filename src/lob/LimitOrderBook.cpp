@@ -178,7 +178,7 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
         if (liquidity < quantity) {return -1;}
     }
 
-    OrderID order_id = generate_order_id();
+    OrderID order_id = generate_order_id(side, price);
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
@@ -212,6 +212,16 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
     }
 
     return order_id;
+}
+
+
+OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
+    uint64_t id = 0;
+    if (side == SELL) id |= (1ULL << 63);
+    id |= (static_cast<uint64_t>(price) << 32);
+    id |= static_cast<uint32_t>(next_order_id);
+    next_order_id++;
+    return id;
 }
 
 
