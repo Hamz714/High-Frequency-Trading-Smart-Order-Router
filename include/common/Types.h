@@ -14,12 +14,17 @@ struct Order {
     int64_t price;
     int64_t quantity;
     Side side;
+    int32_t prev_index;
+    int32_t next_index;
+    bool is_active;
 };
 
 struct PriceLevel {
     int64_t price;
     int64_t quantity;
-    std::deque<Order> orders;
+    int32_t head_order_index;
+    int32_t tail_order_index;
+    // std::deque<Order> orders;
 };
 
 struct SnapshotLevel {

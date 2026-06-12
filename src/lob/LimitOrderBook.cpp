@@ -131,22 +131,22 @@ void LimitOrderBook::remove_price_level(Side side) {
 }
 
 void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id) {
-    Order order{order_id, price, quantity, side};
+    Order order{order_id, price, quantity, side, -1, -1, true};
     int64_t global_index = price & MASK_MODULO;
     int64_t word_index = global_index / 64;
     int64_t bit_index = global_index % 64;
+
+    int64_t order_index = order_id & 0x00000000FFFFFFFF;
+    global_order_pool[order_index] = order;
+
+    PriceLevel& price_level = PriceLevel();
     
     if (side == SELL) {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
-            ask_ladder[global_index].orders.push_back(order); 
-            ask_ladder[global_index].quantity += quantity;
-            ask_ladder[global_index].price = price;
+            price_level = ask_ladder[global_index];
             ask_bitmask[word_index] |= 1ULL << bit_index;
         } else {
-            PriceLevel& price_level = ask_overflow[price];
-            price_level.orders.push_back(order);
-            price_level.quantity += quantity;
-            price_level.price = price;
+            price_level = ask_overflow[price];
         }
 
         if (price < best_ask) {
@@ -154,21 +154,23 @@ void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity,
         }
     } else {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
-            bid_ladder[global_index].orders.push_back(order);
-            bid_ladder[global_index].quantity += quantity;
-            bid_ladder[global_index].price = price;
+            price_level = bid_ladder[global_index];
             bid_bitmask[word_index] |= 1ULL << bit_index;
         } else {
-            PriceLevel& price_level = bid_overflow[price];
-            price_level.orders.push_back(order);
-            price_level.quantity += quantity;
-            price_level.price = price;
+            price_level = bid_overflow[price];
         }
 
         if (price > best_bid) {
             best_bid = price;
         }
     }
+
+    global_order_pool[order_index].prev_index = price_level.tail_order_index;
+    global_order_pool[price_level.tail_order_index].next_index = order_index;
+    price_level.tail_order_index = order_index;
+
+    price_level.quantity += quantity;
+    price_level.price = price;
 }
 
 
@@ -188,12 +190,14 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
         if (!valid_price(side, next_price_level.price, price)) {break;}
 
         while (remaining_quantity && next_price_level.quantity) {
-            Order& next_book_order = next_price_level.orders.front();
+            Order& next_book_order = global_order_pool[next_price_level.head_order_index];
 
             if (remaining_quantity >= next_book_order.quantity) {
                 remaining_quantity -= next_book_order.quantity;
                 next_price_level.quantity -= next_book_order.quantity;
-                next_price_level.orders.pop_front(); //order complete
+                next_book_order.quantity = 0;
+                next_book_order.is_active = false; // order complete
+                next_price_level.head_order_index = next_book_order.next_index;
 
             } else {
                 next_price_level.quantity -= remaining_quantity;
@@ -219,8 +223,8 @@ OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
     uint64_t id = 0;
     if (side == SELL) id |= (1ULL << 63);
     id |= (static_cast<uint64_t>(price) << 32);
-    id |= static_cast<uint32_t>(next_order_id);
-    next_order_id++;
+    id |= static_cast<uint32_t>(next_order_index);
+    next_order_index++;
     return id;
 }
 

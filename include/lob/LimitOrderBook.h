@@ -4,6 +4,7 @@
 #include <array>
 #include <map>
 #include <functional>
+#include <vector>
 
 constexpr int64_t LADDER_DEPTH = 256; //must be power of 2
 constexpr int64_t MASK_MODULO = LADDER_DEPTH - 1;
@@ -26,7 +27,9 @@ class LimitOrderBook {
     std::map<int64_t, PriceLevel, std::greater<int64_t>> bid_overflow;
     std::map<int64_t, PriceLevel> ask_overflow;
 
-    int64_t next_order_id = 1;
+    int64_t next_order_index = 1;
+
+    std::vector<Order> global_order_pool{10'000'000};
 
     PriceLevel& get_price_level(Side side);
 
