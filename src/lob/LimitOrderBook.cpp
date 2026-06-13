@@ -225,7 +225,7 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
         }
 
         if (next_price_level.quantity == 0) {
-            remove_price_level(side);
+            remove_price_level(side, next_price_level.price);
         }
     }
 
@@ -250,47 +250,49 @@ OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
 bool LimitOrderBook::cancel(OrderID id) {
     Side side = (id & (1ULL << 63)) ? SELL : BUY;
     int64_t price = (id >> 32) & 0x7FFFFFFF;
-    int64_t order_index = id & 0x00000000FFFFFFFF;
+    int64_t order_index = id & 0xFFFFFFFF;
 
     Order& order = global_order_pool[order_index];
 
     if (!order.is_active) return false;
 
     int64_t global_index = price & MASK_MODULO;
-    PriceLevel& price_level = PriceLevel();
+    PriceLevel* price_level = nullptr;
 
     if (side == BUY) {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
-            price_level = bid_ladder[global_index];
+            price_level = &bid_ladder[global_index];
         } else {
-            price_level = bid_overflow[price];
+            price_level = &bid_overflow[price];
         }
     } else {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
-            price_level = ask_ladder[global_index];
+            price_level = &ask_ladder[global_index];
         } else {
-            price_level = ask_overflow[price];
+            price_level = &ask_overflow[price];
         }
     }
 
     order.is_active = false;
-    price_level.quantity -= order.quantity;
+    price_level->quantity -= order.quantity;
 
     if (order.prev_index != -1) {
         global_order_pool[order.prev_index].next_index = order.next_index;
     } else {
-        price_level.head_order_index = order.next_index;
+        price_level->head_order_index = order.next_index;
     }
 
     if (order.next_index != -1) {
         global_order_pool[order.next_index].prev_index = order.prev_index;
     } else {
-        price_level.tail_order_index = order.prev_index;
+        price_level->tail_order_index = order.prev_index;
     }
 
-    if (price_level.quantity == 0) {
-        remove_price_level(side);
+    if (price_level->quantity == 0) {
+        remove_price_level(side, price);
     }
+
+    return true;
 }
 
 
