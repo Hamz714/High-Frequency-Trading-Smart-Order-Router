@@ -24,7 +24,6 @@ struct PriceLevel {
     int64_t quantity;
     int32_t head_order_index;
     int32_t tail_order_index;
-    // std::deque<Order> orders;
 };
 
 struct SnapshotLevel {

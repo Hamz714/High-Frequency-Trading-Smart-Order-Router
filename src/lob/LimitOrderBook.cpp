@@ -24,111 +24,129 @@ bool valid_price(Side side, int64_t book_best_price, int64_t order_price) {
     }
 }
 
-void LimitOrderBook::remove_price_level(Side side) {
+void LimitOrderBook::remove_price_level(Side side, int64_t price) {
+    int64_t global_index = price & MASK_MODULO;
+    int64_t word_index = global_index / 64;
+    int64_t bit_index = global_index % 64;
+
     if (side == BUY) {
-        if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
-            int64_t global_index = best_ask & MASK_MODULO;
-            int64_t word_index = global_index / 64;
-            int64_t bit_index = global_index % 64;
-
-            uint64_t search_mask = (bit_index == 63) ? 0ULL : (~0ULL) << (bit_index + 1);
-            uint64_t masked_word = ask_bitmask[word_index] & search_mask;
-            
-            if (masked_word != 0) {
-                int next_local_bit = __builtin_ctzll(masked_word);
-                best_ask = ask_ladder[word_index * 64 + next_local_bit].price;
-                return;
-            } else {
-                bool overflow = false;
-                for (int i = 1; i < ask_bitmask.size(); i++) {
-                    int next_word_index = (word_index + i) % ask_bitmask.size(); 
-                    int64_t window_top_word_index = (ask_ladder_higher & MASK_MODULO) / 64;
-                    
-                    if (next_word_index == window_top_word_index) {
-                        int64_t window_top_bit_index = (ask_ladder_higher & MASK_MODULO) % 64;
-                        uint64_t boundary_mask = (~0ULL) >> (63 - window_top_bit_index);
-                        uint64_t masked_word_boundary = ask_bitmask[next_word_index] & boundary_mask;
-                        
-                        if (masked_word_boundary != 0) {
-                            int next_local_bit = __builtin_ctzll(masked_word_boundary);
-                            best_ask = ask_ladder[next_word_index * 64 + next_local_bit].price;
-                            return;
-                        } else {
-                            overflow = true;
-                        }
-                    } else {
-                        if (ask_bitmask[next_word_index] != 0) {
-                            int next_local_bit = __builtin_ctzll(ask_bitmask[next_word_index]);
-                            best_ask = ask_ladder[next_word_index * 64 + next_local_bit].price;
-                            return;
-                        }
-                    }
-                    if (overflow) {break;}
-                }
-            }
+        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
+            ask_bitmask[word_index] &= ~(1ULL << bit_index); 
         } else {
-            if (!ask_overflow.empty()) {
-                ask_overflow.erase(ask_overflow.begin());
-            }
-        }
-        
-        if (ask_overflow.empty()) {
-            best_ask = INFINITY;
-        } else {
-            best_ask = ask_overflow.begin()->first;
+            ask_overflow.erase(price);
         }
 
+        if (price == best_ask) {
+            find_next_best_ask();
+        }
     } else {
-        if (best_bid >= bid_ladder_lower && best_bid <= bid_ladder_higher) {
-            int64_t global_index = best_bid & MASK_MODULO;
-            int64_t word_index = global_index / 64;
-            int64_t bit_index = global_index % 64;
-
-            uint64_t search_mask = (1ULL << bit_index) - 1;
-            uint64_t masked_word = bid_bitmask[word_index] & search_mask;
-            if (masked_word != 0) {
-                int next_local_bit = 63 - __builtin_clzll(masked_word);
-                best_bid = bid_ladder[word_index * 64 + next_local_bit].price;
-                return;
-            } else {
-                bool overflow = false;
-                for (int i = 1; i < bid_bitmask.size(); i++) {
-                    int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
-                    int64_t window_bottom_word_index = (bid_ladder_lower & MASK_MODULO) / 64;
-
-                    if (next_word_index == window_bottom_word_index) {
-                        int64_t window_bottom_bit_index = (bid_ladder_lower & MASK_MODULO) % 64;
-                        uint64_t boundary_mask = (~0ULL) << window_bottom_bit_index;
-                        uint64_t masked_word = bid_bitmask[next_word_index] & boundary_mask;
-
-                        if (masked_word != 0) {
-                            int next_local_bit = 63 - __builtin_clzll(masked_word);
-                            best_bid = bid_ladder[next_word_index * 64 + next_local_bit].price;
-                            return;
-                        } else {
-                            overflow = true;
-                        }
-                    } else {
-                        if (bid_bitmask[next_word_index] != 0) {
-                            int next_local_bit = 63 - __builtin_clzll(bid_bitmask[next_word_index]);
-                            best_bid = bid_ladder[next_word_index * 64 + next_local_bit].price;
-                            return;
-                        }
-                    }
-                    if (overflow) {break;}
-                }
-            }
+        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
+            bid_bitmask[word_index] &= ~(1ULL << bit_index);
         } else {
-            bid_overflow.erase(bid_overflow.begin());
+            bid_overflow.erase(price);
         }
 
-        if (bid_overflow.empty()) {
-            best_bid = 0;
-        } else {
-            best_bid = bid_overflow.begin()->first;
+        if (price == best_bid) {
+            find_next_best_bid();
         }
     }
 }
+
+void LimitOrderBook::find_next_best_ask() {
+    if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
+        int64_t global_index = best_ask & MASK_MODULO;
+        int64_t word_index = global_index / 64;
+        int64_t bit_index = global_index % 64;
+
+        uint64_t search_mask = (bit_index == 63) ? 0ULL : (~0ULL) << (bit_index + 1);
+        uint64_t masked_word = ask_bitmask[word_index] & search_mask;
+
+        if (masked_word != 0) {
+            int next_bit_index = __builtin_ctzll(masked_word);
+            best_ask = ask_ladder[word_index * 64 + next_bit_index].price;
+            return;
+        }
+
+        for (int i = 1; i < ask_bitmask.size(); i++) {
+            int next_word_index = (word_index + i) % ask_bitmask.size();
+            int64_t window_top_word_index = (ask_ladder_higher & MASK_MODULO) / 64;
+
+            if (next_word_index == window_top_word_index) {
+                int64_t window_top_bit_index = (ask_ladder_higher & MASK_MODULO) % 64;
+                uint64_t boundary_mask = (~0ULL) >> (63 - window_top_bit_index);
+                uint64_t masked_word_boundary = ask_bitmask[next_word_index] & boundary_mask;
+                
+                if (masked_word_boundary != 0) {
+                    int next_bit_index = __builtin_ctzll(masked_word_boundary);
+                    best_ask = ask_ladder[next_word_index * 64 + next_bit_index].price;
+                    return;
+                } else {
+                    break;
+                } 
+            } else {
+                if (ask_bitmask[next_word_index] != 0) {
+                    int next_local_bit = __builtin_ctzll(ask_bitmask[next_word_index]);
+                    best_ask = ask_ladder[next_word_index * 64 + next_local_bit].price;
+                    return;
+                }
+            }
+        }
+    }
+    if (ask_overflow.empty()) {
+        best_ask = INT64_MAX;
+    } else {
+        best_ask = ask_overflow.begin()->first;
+    }
+}
+
+
+void LimitOrderBook::find_next_best_bid() {
+    if (best_bid >= bid_ladder_lower && best_bid <= bid_ladder_higher) {
+        int64_t global_index = best_bid & MASK_MODULO;
+        int64_t word_index = global_index / 64;
+        int64_t bit_index = global_index % 64;
+
+        uint64_t search_mask = (1ULL << bit_index) - 1;
+        uint64_t masked_word = bid_bitmask[word_index] & search_mask;
+
+        if (masked_word != 0) {
+            int next_bit_index = 63 - __builtin_clzll(masked_word);
+            best_bid = bid_ladder[word_index * 64 + next_bit_index].price;
+            return;
+        }
+
+        for (int i = 1; i < bid_bitmask.size(); i++) {
+            int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
+            int64_t window_bottom_word_index = (bid_ladder_lower & MASK_MODULO) / 64;
+
+            if (next_word_index == window_bottom_word_index) {
+                int64_t window_bottom_bit_index = (bid_ladder_lower & MASK_MODULO) % 64;
+                uint64_t boundary_mask = (~0ULL) << window_bottom_bit_index;
+                uint64_t masked_word_boundary = bid_bitmask[next_word_index] & boundary_mask;
+                
+                if (masked_word_boundary != 0) {
+                    int next_bit_index = 63 - __builtin_clzll(masked_word_boundary);
+                    best_bid = bid_ladder[next_word_index * 64 + next_bit_index].price;
+                    return;
+                } else {
+                    break; 
+                } 
+            } else {
+                if (bid_bitmask[next_word_index] != 0) {
+                    int next_local_bit = 63 - __builtin_clzll(bid_bitmask[next_word_index]);
+                    best_bid = bid_ladder[next_word_index * 64 + next_local_bit].price;
+                    return;
+                }
+            }
+        }
+    }    
+    if (bid_overflow.empty()) {
+        best_bid = 0;
+    } else {
+        best_bid = bid_overflow.begin()->first;
+    }
+}
+
 
 void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id) {
     Order order{order_id, price, quantity, side, -1, -1, true};
@@ -226,6 +244,53 @@ OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
     id |= static_cast<uint32_t>(next_order_index);
     next_order_index++;
     return id;
+}
+
+
+bool LimitOrderBook::cancel(OrderID id) {
+    Side side = (id & (1ULL << 63)) ? SELL : BUY;
+    int64_t price = (id >> 32) & 0x7FFFFFFF;
+    int64_t order_index = id & 0x00000000FFFFFFFF;
+
+    Order& order = global_order_pool[order_index];
+
+    if (!order.is_active) return false;
+
+    int64_t global_index = price & MASK_MODULO;
+    PriceLevel& price_level = PriceLevel();
+
+    if (side == BUY) {
+        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
+            price_level = bid_ladder[global_index];
+        } else {
+            price_level = bid_overflow[price];
+        }
+    } else {
+        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
+            price_level = ask_ladder[global_index];
+        } else {
+            price_level = ask_overflow[price];
+        }
+    }
+
+    order.is_active = false;
+    price_level.quantity -= order.quantity;
+
+    if (order.prev_index != -1) {
+        global_order_pool[order.prev_index].next_index = order.next_index;
+    } else {
+        price_level.head_order_index = order.next_index;
+    }
+
+    if (order.next_index != -1) {
+        global_order_pool[order.next_index].prev_index = order.prev_index;
+    } else {
+        price_level.tail_order_index = order.prev_index;
+    }
+
+    if (price_level.quantity == 0) {
+        remove_price_level(side);
+    }
 }
 
 

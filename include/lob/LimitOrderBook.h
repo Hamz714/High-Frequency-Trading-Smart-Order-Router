@@ -33,9 +33,13 @@ class LimitOrderBook {
 
     PriceLevel& get_price_level(Side side);
 
-    void remove_price_level(Side side);
+    void remove_price_level(Side side, int64_t price);
 
     void add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id);
+
+    void find_next_best_ask();
+
+    void find_next_best_bid();
 
     OrderID generate_order_id(Side side, int64_t price);
 
