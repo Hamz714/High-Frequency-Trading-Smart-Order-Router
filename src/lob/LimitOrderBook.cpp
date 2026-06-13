@@ -296,6 +296,87 @@ bool LimitOrderBook::cancel(OrderID id) {
 }
 
 
+BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
+    BookSnapshot snapshot;
+    snapshot.asks.reserve(max_levels); 
+    snapshot.bids.reserve(max_levels);
+
+    if (best_ask != INT64_MAX) { 
+        if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
+            int64_t global_index = best_ask & MASK_MODULO;
+            int64_t word_index = global_index / 64;
+
+            for (int i = 0; i < ask_bitmask.size() && snapshot.asks.size() < max_levels; i++) {
+                int next_word_index = (word_index + i) % ask_bitmask.size();
+                uint64_t word = ask_bitmask[next_word_index];
+
+                int64_t window_top_word_index = (ask_ladder_higher & MASK_MODULO) / 64;
+                if (next_word_index == window_top_word_index) {
+                    int64_t window_top_bit_index = (ask_ladder_higher & MASK_MODULO) % 64;
+                    word &= (~0ULL) >> (63 - window_top_bit_index);
+                }
+
+                while (word != 0 && snapshot.asks.size() < max_levels) {
+                    int active_bit = __builtin_ctzll(word);
+                    int64_t exact_index = next_word_index * 64 + active_bit;
+                    
+                    snapshot.asks.push_back({
+                        ask_ladder[exact_index].price,
+                        ask_ladder[exact_index].quantity
+                    });
+
+                    word &= ~(1ULL << active_bit);
+                }
+
+                if (next_word_index == window_top_word_index) break;
+            }
+        }
+
+        for (auto it = ask_overflow.begin(); it != ask_overflow.end() && snapshot.asks.size() < max_levels; ++it) {
+            snapshot.asks.push_back({it->first, it->second.quantity});
+        }
+    }
+
+    if (best_bid != 0) { 
+        if (best_bid >= bid_ladder_lower && best_bid <= bid_ladder_higher) {
+            int64_t global_index = best_bid & MASK_MODULO;
+            int64_t word_index = global_index / 64;
+
+            for (int i = 0; i < bid_bitmask.size() && snapshot.bids.size() < max_levels; i++) {
+                int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
+                uint64_t word = bid_bitmask[next_word_index];
+
+                int64_t window_bottom_word_index = (bid_ladder_lower & MASK_MODULO) / 64;
+                if (next_word_index == window_bottom_word_index) {
+                    int64_t window_bottom_bit_index = (bid_ladder_lower & MASK_MODULO) % 64;
+                    word &= (~0ULL) << window_bottom_bit_index;
+                }
+
+                while (word != 0 && snapshot.bids.size() < max_levels) {
+                    int active_bit = 63 - __builtin_clzll(word);
+                    int64_t exact_index = next_word_index * 64 + active_bit;
+                    
+                    snapshot.bids.push_back({
+                        bid_ladder[exact_index].price,
+                        bid_ladder[exact_index].quantity
+                    });
+
+                    word &= ~(1ULL << active_bit);
+                }
+
+                if (next_word_index == window_bottom_word_index) break;
+            }
+        }
+
+        for (auto it = bid_overflow.begin(); it != bid_overflow.end() && snapshot.bids.size() < max_levels; ++it) {
+            snapshot.bids.push_back({it->first, it->second.quantity});
+        }
+    }
+
+    return snapshot;
+}
+
+
 int64_t available_liquidity(Side side, int64_t worst_price) {
 
 }

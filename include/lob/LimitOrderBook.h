@@ -48,7 +48,7 @@ class LimitOrderBook {
 
         bool cancel(OrderID id);
 
-        BookSnapshot get_snapshot(int levels);
+        BookSnapshot get_snapshot(int levels) const;
 
         int64_t available_liquidity(Side side, int64_t worst_price);
 
