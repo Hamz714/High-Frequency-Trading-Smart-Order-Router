@@ -41,6 +41,12 @@ class LimitOrderBook {
 
     void find_next_best_bid();
 
+    void shift_ask_window();
+    void evict_ask_range(int64_t low_price, int64_t high_price);
+
+    void shift_bid_window();
+    void evict_bid_range(int64_t low_price, int64_t high_price);
+
     OrderID generate_order_id(Side side, int64_t price);
 
     public:

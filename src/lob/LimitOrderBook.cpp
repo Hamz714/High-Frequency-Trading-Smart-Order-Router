@@ -157,14 +157,14 @@ void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity,
     int64_t order_index = order_id & 0x00000000FFFFFFFF;
     global_order_pool[order_index] = order;
 
-    PriceLevel& price_level = PriceLevel();
+    PriceLevel* price_level = nullptr;
     
     if (side == SELL) {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
-            price_level = ask_ladder[global_index];
+            price_level = &ask_ladder[global_index];
             ask_bitmask[word_index] |= 1ULL << bit_index;
         } else {
-            price_level = ask_overflow[price];
+            price_level = &ask_overflow[price];
         }
 
         if (price < best_ask) {
@@ -172,10 +172,10 @@ void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity,
         }
     } else {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
-            price_level = bid_ladder[global_index];
+            price_level = &bid_ladder[global_index];
             bid_bitmask[word_index] |= 1ULL << bit_index;
         } else {
-            price_level = bid_overflow[price];
+            price_level = &bid_overflow[price];
         }
 
         if (price > best_bid) {
@@ -183,12 +183,154 @@ void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity,
         }
     }
 
-    global_order_pool[order_index].prev_index = price_level.tail_order_index;
-    global_order_pool[price_level.tail_order_index].next_index = order_index;
-    price_level.tail_order_index = order_index;
+    global_order_pool[order_index].prev_index = price_level->tail_order_index;
+    price_level->tail_order_index = order_index;
+    if (price_level->tail_order_index != -1) {
+        global_order_pool[price_level->tail_order_index].next_index = order_index;
+    } else {
+        price_level->head_order_index = order_index;
+    }
 
-    price_level.quantity += quantity;
-    price_level.price = price;
+    price_level->quantity += quantity;
+    price_level->price = price;
+}
+
+
+void LimitOrderBook::shift_ask_window() {
+    int64_t buffer_size = LADDER_DEPTH * 10 / 100; 
+    
+    int64_t new_lower = best_ask - buffer_size;
+    int64_t new_higher = new_lower + LADDER_DEPTH - 1;
+    
+    if (new_lower > ask_ladder_higher || new_higher < ask_ladder_lower) {
+        evict_ask_range(ask_ladder_lower, ask_ladder_higher);
+    } else {
+        if (new_lower > ask_ladder_lower) {
+            evict_ask_range(ask_ladder_lower, new_lower - 1); 
+        }
+        if (new_higher < ask_ladder_higher) {
+            evict_ask_range(new_higher + 1, ask_ladder_higher); 
+        }
+    }
+    
+    auto start_it = ask_overflow.lower_bound(new_lower);
+    auto end_it = ask_overflow.upper_bound(new_higher);
+    
+    for (auto it = start_it; it != end_it; ++it) {
+        int64_t price = it->first;
+        int64_t global_index = price & MASK_MODULO;
+        int64_t word_index = global_index / 64;
+        int64_t bit_index = global_index % 64;
+        
+        ask_ladder[global_index] = it->second;
+        ask_bitmask[word_index] |= (1ULL << bit_index);
+    }
+    ask_overflow.erase(start_it, end_it);
+    
+    ask_ladder_lower = new_lower;
+    ask_ladder_higher = new_higher;
+}
+
+void LimitOrderBook::evict_ask_range(int64_t low_price, int64_t high_price) {
+    int64_t total_slots_to_check = high_price - low_price + 1;
+    int64_t current_idx = low_price & MASK_MODULO;
+
+    while (total_slots_to_check > 0) {
+        int64_t word_index = current_idx / 64;
+        int64_t bit_index = current_idx % 64;
+        
+        uint64_t word = ask_bitmask[word_index];
+        int64_t bits_to_check = std::min<int64_t>(64 - bit_index, total_slots_to_check);
+        
+        uint64_t range_mask = (bits_to_check == 64) ? ~0ULL : (1ULL << bits_to_check) - 1;
+        word = (word >> bit_index) & range_mask;
+        
+        while (word != 0) {
+            int active_bit = __builtin_ctzll(word); 
+            int64_t found_bit_index = bit_index + active_bit;
+            int64_t global_index = word_index * 64 + found_bit_index;
+            
+            int64_t evict_price = ask_ladder[global_index].price;
+            
+            ask_overflow[evict_price] = ask_ladder[global_index];
+            ask_ladder[global_index] = PriceLevel(); 
+            ask_bitmask[word_index] &= ~(1ULL << found_bit_index);
+            
+            word &= ~(1ULL << active_bit);
+        }
+        
+        total_slots_to_check -= bits_to_check;
+        current_idx = (current_idx + bits_to_check) % LADDER_DEPTH;
+    }
+}
+
+
+void LimitOrderBook::shift_bid_window() {
+    int64_t buffer_size = LADDER_DEPTH * 10 / 100; 
+    
+    int64_t new_higher = best_bid + buffer_size;
+    int64_t new_lower = new_higher - LADDER_DEPTH + 1;
+    
+    if (new_lower > bid_ladder_higher || new_higher < bid_ladder_lower) {
+        evict_bid_range(bid_ladder_lower, bid_ladder_higher);
+    } else {
+        if (new_lower > bid_ladder_lower) {
+            evict_bid_range(bid_ladder_lower, new_lower - 1); 
+        }
+        if (new_higher < bid_ladder_higher) {
+            evict_bid_range(new_higher + 1, bid_ladder_higher); 
+        }
+    }
+    
+    auto start_it = bid_overflow.lower_bound(new_higher);
+    auto end_it = bid_overflow.upper_bound(new_lower);
+    
+    for (auto it = start_it; it != end_it; ++it) {
+        int64_t price = it->first;
+        int64_t global_index = price & MASK_MODULO;
+        int64_t word_index = global_index / 64;
+        int64_t bit_index = global_index % 64;
+        
+        bid_ladder[global_index] = it->second;
+        bid_bitmask[word_index] |= (1ULL << bit_index);
+    }
+    bid_overflow.erase(start_it, end_it);
+    
+    bid_ladder_lower = new_lower;
+    bid_ladder_higher = new_higher;
+}
+
+void LimitOrderBook::evict_bid_range(int64_t low_price, int64_t high_price) {
+    int64_t total_slots_to_check = high_price - low_price + 1;
+    int64_t current_idx = low_price & MASK_MODULO;
+
+    while (total_slots_to_check > 0) {
+        int64_t word_index = current_idx / 64;
+        int64_t bit_index = current_idx % 64;
+        
+        uint64_t word = bid_bitmask[word_index];
+        int64_t bits_to_check = std::min<int64_t>(64 - bit_index, total_slots_to_check);
+        
+        uint64_t range_mask = (bits_to_check == 64) ? ~0ULL : (1ULL << bits_to_check) - 1;
+        word = (word >> bit_index) & range_mask;
+        
+        while (word != 0) {
+            int active_bit = __builtin_ctzll(word);
+            int64_t found_bit_index = bit_index + active_bit;
+            int64_t global_index = word_index * 64 + found_bit_index;
+            
+            int64_t evict_price = bid_ladder[global_index].price;
+            
+            bid_overflow[evict_price] = bid_ladder[global_index];
+            bid_ladder[global_index] = PriceLevel();
+            bid_bitmask[word_index] &= ~(1ULL << found_bit_index);
+            
+            word &= ~(1ULL << active_bit);
+        }
+        
+        total_slots_to_check -= bits_to_check;
+        current_idx = (current_idx + bits_to_check) % LADDER_DEPTH;
+    }
 }
 
 
