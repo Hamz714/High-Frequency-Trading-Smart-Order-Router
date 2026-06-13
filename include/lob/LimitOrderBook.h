@@ -56,7 +56,7 @@ class LimitOrderBook {
 
         BookSnapshot get_snapshot(int levels) const;
 
-        int64_t available_liquidity(Side side, int64_t worst_price);
+        int64_t available_liquidity(Side side, int64_t worst_price) const;
 
         void on_fill(std::function<void(BookSnapshot)> callback);
 };
