@@ -35,3 +35,9 @@ struct BookSnapshot {
     std::vector<SnapshotLevel> bids;
     std::vector<SnapshotLevel> asks;
 };
+
+struct Fill {
+    OrderID order_id;
+    int64_t filled_quantity;
+    int64_t fill_price;
+};

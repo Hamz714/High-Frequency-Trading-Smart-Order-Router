@@ -31,11 +31,15 @@ class LimitOrderBook {
 
     std::vector<Order> global_order_pool{10'000'000};
 
+    std::function<void(Fill)> fill_callback;
+
+    std::function<void(BookSnapshot)> update_callback;
+
     PriceLevel& get_price_level(Side side);
 
     void remove_price_level(Side side, int64_t price);
 
-    void add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id);
+    void add_to_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id);
 
     void find_next_best_ask();
 
@@ -58,5 +62,7 @@ class LimitOrderBook {
 
         int64_t available_liquidity(Side side, int64_t worst_price) const;
 
-        void on_fill(std::function<void(BookSnapshot)> callback);
+        void on_fill(std::function<void(Fill)> callback);
+
+        void on_book_update(std::function<void(BookSnapshot)> callback);
 };

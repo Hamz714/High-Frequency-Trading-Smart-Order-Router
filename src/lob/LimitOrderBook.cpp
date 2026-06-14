@@ -113,7 +113,6 @@ void LimitOrderBook::find_next_best_ask() {
 
 }
 
-
 void LimitOrderBook::find_next_best_bid() {
     bool overflow = true;
 
@@ -175,8 +174,7 @@ void LimitOrderBook::find_next_best_bid() {
     }
 }
 
-
-void LimitOrderBook::add_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id) {
+void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quantity, OrderID order_id) {
     Order order{order_id, price, quantity, side, -1, -1, true};
     int64_t global_index = price & MASK_MODULO;
     int64_t word_index = global_index / 64;
@@ -372,26 +370,37 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
-        if (available_liquidity(side, price) == 0) {break;}
+        if (side == BUY && best_ask == INT64_MAX) break;
+        if (side == SELL && best_bid == 0) break;
 
         PriceLevel& next_price_level = get_price_level(side);
-        if (!valid_price(side, next_price_level.price, price)) {break;}
+        if (!valid_price(side, next_price_level.price, price)) break;
 
+        int64_t quantity_at_price_level = 0;
         while (remaining_quantity && next_price_level.quantity) {
             Order& next_book_order = global_order_pool[next_price_level.head_order_index];
+            int64_t matched_quantity;
 
             if (remaining_quantity >= next_book_order.quantity) {
-                remaining_quantity -= next_book_order.quantity;
-                next_price_level.quantity -= next_book_order.quantity;
-                next_book_order.quantity = 0;
-                next_book_order.is_active = false; // order complete
+                matched_quantity = next_book_order.quantity;
+                next_book_order.is_active = false;
                 next_price_level.head_order_index = next_book_order.next_index;
-
             } else {
-                next_price_level.quantity -= remaining_quantity;
-                next_book_order.quantity -= remaining_quantity;
-                remaining_quantity = 0;
+                matched_quantity = remaining_quantity;
             }
+
+            if (fill_callback) {
+                fill_callback({next_book_order.id, matched_quantity, next_book_order.price});
+            }
+
+            quantity_at_price_level += matched_quantity;
+            remaining_quantity -= matched_quantity;
+            next_price_level.quantity -= matched_quantity;
+            next_book_order.quantity -= matched_quantity;
+        }
+
+        if (fill_callback) {
+            fill_callback({order_id, quantity_at_price_level, next_price_level.price});
         }
 
         if (next_price_level.quantity == 0) {
@@ -400,7 +409,7 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
     }
 
     if (remaining_quantity && type == LIMIT) {
-        add_price_level(side, price, remaining_quantity, order_id);
+        add_to_price_level(side, price, remaining_quantity, order_id);
     }
 
     return order_id;
@@ -467,16 +476,16 @@ bool LimitOrderBook::cancel(OrderID id) {
 
 
 BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
-    BookSnapshot snapshot;
-    snapshot.asks.reserve(max_levels); 
-    snapshot.bids.reserve(max_levels);
+    BookSnapshot book_snapshot;
+    book_snapshot.asks.reserve(max_levels); 
+    book_snapshot.bids.reserve(max_levels);
 
     if (best_ask != INT64_MAX) { 
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
             int64_t global_index = best_ask & MASK_MODULO;
             int64_t word_index = global_index / 64;
 
-            for (int i = 0; i < ask_bitmask.size() && snapshot.asks.size() < max_levels; i++) {
+            for (int i = 0; i < ask_bitmask.size() && book_snapshot.asks.size() < max_levels; i++) {
                 int next_word_index = (word_index + i) % ask_bitmask.size();
                 uint64_t word = ask_bitmask[next_word_index];
 
@@ -486,14 +495,12 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                     word &= (~0ULL) >> (63 - window_top_bit_index);
                 }
 
-                while (word != 0 && snapshot.asks.size() < max_levels) {
+                while (word != 0 && book_snapshot.asks.size() < max_levels) {
                     int active_bit = __builtin_ctzll(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
-                    
-                    snapshot.asks.push_back({
-                        ask_ladder[exact_index].price,
-                        ask_ladder[exact_index].quantity
-                    });
+
+                    SnapshotLevel snapshot_level = SnapshotLevel{ask_ladder[exact_index].price, ask_ladder[exact_index].quantity};
+                    book_snapshot.asks.push_back(snapshot_level);
 
                     word &= ~(1ULL << active_bit);
                 }
@@ -502,8 +509,8 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
             }
         }
 
-        for (auto it = ask_overflow.begin(); it != ask_overflow.end() && snapshot.asks.size() < max_levels; ++it) {
-            snapshot.asks.push_back({it->first, it->second.quantity});
+        for (auto it = ask_overflow.begin(); it != ask_overflow.end() && book_snapshot.asks.size() < max_levels; ++it) {
+            book_snapshot.asks.push_back({it->first, it->second.quantity});
         }
     }
 
@@ -512,7 +519,7 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
             int64_t global_index = best_bid & MASK_MODULO;
             int64_t word_index = global_index / 64;
 
-            for (int i = 0; i < bid_bitmask.size() && snapshot.bids.size() < max_levels; i++) {
+            for (int i = 0; i < bid_bitmask.size() && book_snapshot.bids.size() < max_levels; i++) {
                 int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
                 uint64_t word = bid_bitmask[next_word_index];
 
@@ -522,14 +529,12 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                     word &= (~0ULL) << window_bottom_bit_index;
                 }
 
-                while (word != 0 && snapshot.bids.size() < max_levels) {
+                while (word != 0 && book_snapshot.bids.size() < max_levels) {
                     int active_bit = 63 - __builtin_clzll(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
                     
-                    snapshot.bids.push_back({
-                        bid_ladder[exact_index].price,
-                        bid_ladder[exact_index].quantity
-                    });
+                    SnapshotLevel snapshot_level = SnapshotLevel{bid_ladder[exact_index].price, bid_ladder[exact_index].quantity};
+                    book_snapshot.bids.push_back(snapshot_level);
 
                     word &= ~(1ULL << active_bit);
                 }
@@ -538,12 +543,12 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
             }
         }
 
-        for (auto it = bid_overflow.begin(); it != bid_overflow.end() && snapshot.bids.size() < max_levels; ++it) {
-            snapshot.bids.push_back({it->first, it->second.quantity});
+        for (auto it = bid_overflow.begin(); it != bid_overflow.end() && book_snapshot.bids.size() < max_levels; ++it) {
+            book_snapshot.bids.push_back({it->first, it->second.quantity});
         }
     }
 
-    return snapshot;
+    return book_snapshot;
 }
 
 
@@ -643,4 +648,8 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
     }
 
     return total_quantity;
+}
+
+void LimitOrderBook::on_fill(std::function<void(Fill)> callback) {
+    fill_callback = callback;
 }
