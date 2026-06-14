@@ -106,7 +106,7 @@ void LimitOrderBook::find_next_best_ask() {
 
     if (best_ask != INT64_MAX) {
         int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
-        if (best_ask < ask_ladder_lower + trigger_zone || best_ask > ask_ladder_higher - trigger_zone) {
+        if (best_ask < ask_ladder_lower + trigger_zone || best_ask > ask_ladder_higher - 2*trigger_zone) {
             shift_ask_window();
         }
     }
@@ -168,7 +168,7 @@ void LimitOrderBook::find_next_best_bid() {
 
     if (best_bid != 0) {
         int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
-        if (best_bid < bid_ladder_lower + trigger_zone || best_bid > bid_ladder_higher - trigger_zone) {
+        if (best_bid < bid_ladder_lower + 2*trigger_zone || best_bid > bid_ladder_higher - trigger_zone) {
             shift_bid_window();
         }
     }
@@ -180,7 +180,7 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
     int64_t word_index = global_index / 64;
     int64_t bit_index = global_index % 64;
 
-    int64_t order_index = order_id & 0x00000000FFFFFFFF;
+    int64_t order_index = order_id & 0xFFFFFFFF;
     global_order_pool[order_index] = order;
 
     PriceLevel* price_level = nullptr;
@@ -195,6 +195,10 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
 
         if (price < best_ask) {
             best_ask = price;
+            int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
+            if (best_ask < ask_ladder_lower + trigger_zone) {
+                shift_ask_window();
+            }
         }
     } else {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
@@ -206,6 +210,10 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
 
         if (price > best_bid) {
             best_bid = price;
+            int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
+            if (best_bid > bid_ladder_higher - trigger_zone) {
+                shift_bid_window();
+            }
         }
     }
 
@@ -412,6 +420,8 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
         add_to_price_level(side, price, remaining_quantity, order_id);
     }
 
+    publish_book_update();
+
     return order_id;
 }
 
@@ -470,6 +480,8 @@ bool LimitOrderBook::cancel(OrderID id) {
     if (price_level->quantity == 0) {
         remove_price_level(side, price);
     }
+
+    publish_book_update();
 
     return true;
 }
@@ -652,4 +664,14 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
 
 void LimitOrderBook::on_fill(std::function<void(Fill)> callback) {
     fill_callback = callback;
+}
+
+void LimitOrderBook::on_book_update(std::function<void(BookSnapshot)> callback) {
+    update_callback = callback;
+}
+
+void LimitOrderBook::publish_book_update() {
+    if (update_callback) {
+        update_callback(get_snapshot(SNAPSHOT_LEVELS));
+    }
 }

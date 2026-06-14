@@ -9,6 +9,8 @@
 constexpr int64_t LADDER_DEPTH = 256; //must be power of 2
 constexpr int64_t MASK_MODULO = LADDER_DEPTH - 1;
 
+constexpr int64_t SNAPSHOT_LEVELS = 5;
+
 class LimitOrderBook {
     std::array<PriceLevel, LADDER_DEPTH> bid_ladder;
     std::array<PriceLevel, LADDER_DEPTH> ask_ladder;
@@ -52,6 +54,8 @@ class LimitOrderBook {
     void evict_bid_range(int64_t low_price, int64_t high_price);
 
     OrderID generate_order_id(Side side, int64_t price);
+
+    void publish_book_update();
 
     public:
         OrderID submit(Side side, OrderType type, int64_t price, int64_t quantity);
