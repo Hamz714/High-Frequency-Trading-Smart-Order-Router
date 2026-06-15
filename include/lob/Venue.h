@@ -14,8 +14,6 @@ class Venue {
         VenueType get_type() const;
         const VenueConfig& get_config() const;
 
-        // double estimate_cost(Side side, int64_t size, int64_t worst_price) const;
-
         OrderID route_order(Side side, OrderType type, int64_t price, int64_t quantity);
 
         BookSnapshot get_venue_snapshot(int levels) const;
