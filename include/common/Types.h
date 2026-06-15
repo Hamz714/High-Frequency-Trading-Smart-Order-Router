@@ -41,3 +41,12 @@ struct Fill {
     int64_t filled_quantity;
     int64_t fill_price;
 };
+
+enum VenueType {LIT, DARK};
+
+struct VenueConfig {
+    VenueType type;
+    double fee_per_share;
+    double latency_us;
+    double impact_coefficient;
+};
