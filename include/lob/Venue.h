@@ -8,13 +8,13 @@ class Venue {
     LimitOrderBook lob;
 
     public:
-        Venue(int id, VenueConfig config);
+        Venue(int id, const VenueConfig& cfg);
 
         int get_id() const;
-        int get_type() const;
+        VenueType get_type() const;
         const VenueConfig& get_config() const;
 
-        double estimate_cost(Side side, int64_t size, int64_t worst_price) const;
+        // double estimate_cost(Side side, int64_t size, int64_t worst_price) const;
 
         OrderID route_order(Side side, OrderType type, int64_t price, int64_t quantity);
 
