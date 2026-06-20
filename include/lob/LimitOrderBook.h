@@ -66,6 +66,8 @@ class LimitOrderBook {
 
         int64_t available_liquidity(Side side, int64_t worst_price) const;
 
+        double half_spread() const;
+
         void on_fill(std::function<void(Fill)> callback);
 
         void on_book_update(std::function<void(BookSnapshot)> callback);

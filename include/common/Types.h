@@ -50,3 +50,13 @@ struct VenueConfig {
     double latency_us;
     double impact_coefficient;
 };
+
+struct SplitResult {
+    std::vector<int64_t> allocations;
+    double expected_cost;
+};
+
+struct RouterConfig {
+    int64_t lot_size;
+    int64_t latency_cost_factor;
+};

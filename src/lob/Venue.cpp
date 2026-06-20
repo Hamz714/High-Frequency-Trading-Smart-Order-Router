@@ -15,6 +15,10 @@ const VenueConfig& Venue::get_config() const {
     return config;
 }
 
+double Venue::half_spread() const {
+    return lob.half_spread();
+}
+
 OrderID Venue::route_order(Side side, OrderType type, int64_t price, int64_t quantity) {
     return lob.submit(side, type, price, quantity);
 }

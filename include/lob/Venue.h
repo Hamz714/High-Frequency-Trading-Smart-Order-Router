@@ -13,6 +13,7 @@ class Venue {
         int get_id() const;
         VenueType get_type() const;
         const VenueConfig& get_config() const;
+        double half_spread() const;
 
         OrderID route_order(Side side, OrderType type, int64_t price, int64_t quantity);
 

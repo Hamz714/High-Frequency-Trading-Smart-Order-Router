@@ -662,6 +662,10 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
     return total_quantity;
 }
 
+double LimitOrderBook::half_spread() const {
+    return (best_ask - best_bid) / 2;
+}
+
 void LimitOrderBook::on_fill(std::function<void(Fill)> callback) {
     fill_callback = callback;
 }
