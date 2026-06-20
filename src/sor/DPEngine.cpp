@@ -16,3 +16,15 @@ double DPEngine::calculate_lit_cost(const Venue* venue, Side side, int64_t quant
 
     return spread_cost + impact_cost + fee_cost + latency_cost;
 }
+
+double DPEngine::calculate_dark_cost(const Venue* venue, Side side, int64_t quantity, int64_t worst_price) const {
+
+}
+
+double DPEngine::estimate_dark_fill_ratio(const Venue* venue, int64_t quantity) const {
+    const VenueConfig& venue_config = venue->get_config();
+    double base_ratio = venue_config.historical_fill_ratio;
+
+    double exponent = -config.dark_pool_decay_rate * quantity;
+    return base_ratio * std::exp(exponent);
+}

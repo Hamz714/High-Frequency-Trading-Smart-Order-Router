@@ -49,6 +49,7 @@ struct VenueConfig {
     double fee_per_share;
     double latency_us;
     double impact_coefficient;
+    double historical_fill_ratio;
 };
 
 struct SplitResult {
@@ -59,4 +60,5 @@ struct SplitResult {
 struct RouterConfig {
     int64_t lot_size;
     int64_t latency_cost_factor;
+    double dark_pool_decay_rate;
 };
