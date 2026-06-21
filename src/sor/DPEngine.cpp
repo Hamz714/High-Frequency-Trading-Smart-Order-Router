@@ -17,8 +17,18 @@ double DPEngine::calculate_lit_cost(const Venue* venue, Side side, int64_t quant
     return spread_cost + impact_cost + fee_cost + latency_cost;
 }
 
-double DPEngine::calculate_dark_cost(const Venue* venue, Side side, int64_t quantity, const std::vector<int64_t>& lit_dp_table) const {
+double DPEngine::calculate_dark_cost(const Venue* venue, int64_t quantity, const std::vector<int64_t>& lit_dp_table) const {
+    const VenueConfig& venue_config = venue->get_config();
 
+    double p_fill = estimate_dark_fill_ratio(venue, quantity);
+
+    double fee_cost = venue_config.fee_per_share * quantity;
+    double latency_cost = venue_config.latency_us * config.latency_cost_factor;
+    double cost_if_filled = fee_cost + latency_cost;
+
+    double miss_penalty = calculate_miss_penalty(quantity, lit_dp_table);
+
+    return (p_fill * cost_if_filled) + ((1.0 - p_fill) * miss_penalty);
 }
 
 double DPEngine::estimate_dark_fill_ratio(const Venue* venue, int64_t quantity) const {
