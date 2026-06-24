@@ -44,7 +44,7 @@ double DPEngine::calculate_miss_penalty(int64_t unfilled_quantity, const std::ve
 
     int64_t index = unfilled_quantity / config.lot_size;
 
-    int64_t fallback_lit_cost = lit_dp_table[index];
+    double fallback_lit_cost = lit_dp_table[index];
     double delay_penalty = config.latency_cost_factor * unfilled_quantity;
 
     return fallback_lit_cost + delay_penalty;
