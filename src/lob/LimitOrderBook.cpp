@@ -679,3 +679,91 @@ void LimitOrderBook::publish_book_update() {
         update_callback(get_snapshot(SNAPSHOT_LEVELS));
     }
 }
+
+void LimitOrderBook::apply_delta(const BookDelta& delta) {
+    Side side = delta.side;
+    int64_t price = delta.price;
+    int64_t new_quantity = delta.new_quantity;
+    int64_t global_index = price & MASK_MODULO;
+    int64_t word_index = global_index / 64;
+    int64_t bit_index = global_index % 64;
+
+    if (side == SELL) { // update asks
+        bool in_window = (price >= ask_ladder_lower && price <= ask_ladder_higher);
+
+        if (new_quantity == 0) {
+            if (in_window) {
+                ask_ladder[global_index] = PriceLevel();
+                ask_bitmask[word_index] &= ~(1ULL << bit_index);
+            } else {
+                ask_overflow.erase(price);
+            }
+
+            if (price == best_ask) {
+                find_next_best_ask();
+            }
+        } else {
+            if (in_window) {
+                ask_ladder[global_index].price = price;
+                ask_ladder[global_index].quantity = new_quantity;
+                ask_ladder[global_index].head_order_index = -1;
+                ask_ladder[global_index].tail_order_index = -1;
+                ask_bitmask[word_index] |= (1ULL << bit_index);
+            } else {
+                PriceLevel pl;
+                pl.price = price;
+                pl.quantity = new_quantity;
+                pl.head_order_index = -1;
+                pl.tail_order_index = -1;
+                ask_overflow[price] = pl;
+            }
+
+            if (price < best_ask) {
+                best_ask = price;
+                int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
+                if (best_ask < ask_ladder_lower + trigger_zone) {
+                    shift_ask_window();
+                }
+            }
+        }
+
+    } else { // BUY -> update bids
+        bool in_window = (price >= bid_ladder_lower && price <= bid_ladder_higher);
+
+        if (new_quantity == 0) {
+            if (in_window) {
+                bid_ladder[global_index] = PriceLevel();
+                bid_bitmask[word_index] &= ~(1ULL << bit_index);
+            } else {
+                bid_overflow.erase(price);
+            }
+
+            if (price == best_bid) {
+                find_next_best_bid();
+            }
+        } else {
+            if (in_window) {
+                bid_ladder[global_index].price = price;
+                bid_ladder[global_index].quantity = new_quantity;
+                bid_ladder[global_index].head_order_index = -1;
+                bid_ladder[global_index].tail_order_index = -1;
+                bid_bitmask[word_index] |= (1ULL << bit_index);
+            } else {
+                PriceLevel pl;
+                pl.price = price;
+                pl.quantity = new_quantity;
+                pl.head_order_index = -1;
+                pl.tail_order_index = -1;
+                bid_overflow[price] = pl;
+            }
+
+            if (price > best_bid) {
+                best_bid = price;
+                int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
+                if (best_bid > bid_ladder_higher - trigger_zone) {
+                    shift_bid_window();
+                }
+            }
+        }
+    }
+}
