@@ -33,11 +33,9 @@ class LimitOrderBook {
 
     std::vector<Order> global_order_pool{10'000'000};
 
-    std::function<void(Fill)> fill_callback;
+    std::function<void(Side, int64_t, int64_t)> update_callback;
 
-    std::function<void(BookSnapshot)> update_callback;
-
-    PriceLevel& get_price_level(Side side);
+    PriceLevel& get_best_price_level(Side side);
 
     void remove_price_level(Side side, int64_t price);
 
@@ -55,10 +53,10 @@ class LimitOrderBook {
 
     OrderID generate_order_id(Side side, int64_t price);
 
-    void publish_book_update();
+    void publish_book_update(Side side, int64_t price, int64_t new_qty);
 
     public:
-        OrderID submit(Side side, OrderType type, int64_t price, int64_t quantity);
+        std::vector<Fill> submit(Side side, OrderType type, int64_t price, int64_t quantity);
 
         bool cancel(OrderID id);
 
@@ -68,7 +66,9 @@ class LimitOrderBook {
 
         double half_spread() const;
 
-        void on_fill(std::function<void(Fill)> callback);
+        void on_book_update(std::function<void(Side, int64_t, int64_t)> callback);
 
-        void on_book_update(std::function<void(BookSnapshot)> callback);
+        int64_t get_quantity_at_price(Side side, int64_t price) const;
+
+        void apply_delta(const BookDelta& delta);
 };

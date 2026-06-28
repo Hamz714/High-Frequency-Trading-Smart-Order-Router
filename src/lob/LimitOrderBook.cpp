@@ -1,6 +1,6 @@
 #include "lob/LimitOrderBook.h"
 
-PriceLevel& LimitOrderBook::get_price_level(Side side) {
+PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
     if (side == BUY) {
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
             return ask_ladder[best_ask & MASK_MODULO];
@@ -367,22 +367,23 @@ void LimitOrderBook::evict_bid_range(int64_t low_price, int64_t high_price) {
     }
 }
 
+std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t quantity) {
+    Side target_side = (side == BUY) ? SELL : BUY;
 
-OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t quantity) {
     if (type == FOK) {
-        int64_t liquidity = available_liquidity(side, price);
-        if (liquidity < quantity) {return -1;}
+        int64_t liquidity = available_liquidity(target_side, price);
+        if (liquidity < quantity) { return std::vector<Fill>{}; }
     }
 
-    OrderID order_id = generate_order_id(side, price);
+    std::vector<Fill> fills;
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
-        if (side == BUY && best_ask == INT64_MAX) break;
-        if (side == SELL && best_bid == 0) break;
+        if (side == BUY && best_ask == INT64_MAX) return fills;
+        if (side == SELL && best_bid == 0) return fills;
 
-        PriceLevel& next_price_level = get_price_level(side);
-        if (!valid_price(side, next_price_level.price, price)) break;
+        PriceLevel& next_price_level = get_best_price_level(target_side);
+        if (!valid_price(side, next_price_level.price, price)) return fills;
 
         int64_t quantity_at_price_level = 0;
         while (remaining_quantity && next_price_level.quantity) {
@@ -397,32 +398,31 @@ OrderID LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t
                 matched_quantity = remaining_quantity;
             }
 
-            if (fill_callback) {
-                fill_callback({next_book_order.id, matched_quantity, next_book_order.price});
-            }
-
             quantity_at_price_level += matched_quantity;
             remaining_quantity -= matched_quantity;
             next_price_level.quantity -= matched_quantity;
             next_book_order.quantity -= matched_quantity;
         }
 
-        if (fill_callback) {
-            fill_callback({order_id, quantity_at_price_level, next_price_level.price});
+        if (quantity_at_price_level > 0) {
+            fills.push_back({-1, quantity_at_price_level, next_price_level.price});
         }
 
+        publish_book_update(target_side, next_price_level.price, next_price_level.quantity);
+
         if (next_price_level.quantity == 0) {
-            remove_price_level(side, next_price_level.price);
+            remove_price_level(target_side, next_price_level.price);
         }
     }
 
     if (remaining_quantity && type == LIMIT) {
-        add_to_price_level(side, price, remaining_quantity, order_id);
+        OrderID resting_order_id = generate_order_id(side, price);
+        add_to_price_level(side, price, remaining_quantity, resting_order_id);
+
+        publish_book_update(side, price, get_quantity_at_price(side, price));
     }
 
-    publish_book_update();
-
-    return order_id;
+    return fills;
 }
 
 
@@ -477,11 +477,11 @@ bool LimitOrderBook::cancel(OrderID id) {
         price_level->tail_order_index = order.prev_index;
     }
 
+    publish_book_update(side, price, price_level->quantity);
+
     if (price_level->quantity == 0) {
         remove_price_level(side, price);
     }
-
-    publish_book_update();
 
     return true;
 }
@@ -662,21 +662,37 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
     return total_quantity;
 }
 
+int64_t LimitOrderBook::get_quantity_at_price(Side side, int64_t price) const {
+    int64_t global_index = price & MASK_MODULO;
+
+    if (side == BUY) {
+        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
+            return bid_ladder[global_index].quantity;
+        }
+        auto it = bid_overflow.find(price);
+        if (it != bid_overflow.end()) return it->second.quantity;
+        return 0;
+    } else {
+        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
+            return ask_ladder[global_index].quantity;
+        }
+        auto it = ask_overflow.find(price);
+        if (it != ask_overflow.end()) return it->second.quantity;
+        return 0;
+    }
+}
+
 double LimitOrderBook::half_spread() const {
     return (best_ask - best_bid) / 2;
 }
 
-void LimitOrderBook::on_fill(std::function<void(Fill)> callback) {
-    fill_callback = callback;
-}
-
-void LimitOrderBook::on_book_update(std::function<void(BookSnapshot)> callback) {
+void LimitOrderBook::on_book_update(std::function<void(Side, int64_t, int64_t)> callback) {
     update_callback = callback;
 }
 
-void LimitOrderBook::publish_book_update() {
+void LimitOrderBook::publish_book_update(Side side, int64_t price, int64_t new_qty) {
     if (update_callback) {
-        update_callback(get_snapshot(SNAPSHOT_LEVELS));
+        update_callback(side, price, new_qty);
     }
 }
 
