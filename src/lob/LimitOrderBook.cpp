@@ -683,6 +683,7 @@ int64_t LimitOrderBook::get_quantity_at_price(Side side, int64_t price) const {
 }
 
 double LimitOrderBook::half_spread() const {
+    if (best_ask == INT64_MAX || best_bid == 0) return 0.0;
     return (best_ask - best_bid) / 2;
 }
 
