@@ -95,6 +95,14 @@ struct OrderRequest {
     int64_t quantity;
 };
 
+struct ParentOrder {
+    OrderID parent_id;
+    Side side;
+    int64_t price;
+    int64_t total_qty;
+    int64_t remaining_qty;
+};
+
 struct VenueState {
     int venue_id;
     VenueConfig config;
