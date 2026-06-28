@@ -5,9 +5,15 @@
 
 using OrderID = int64_t;
 
+using VenueID = int64_t;
+
 enum Side {BUY, SELL};
 
 enum OrderType {LIMIT, MARKET, IOC, FOK};
+
+enum SenderType {SOR, MM};
+
+enum OrderStatus {PARTIAL, FILLED, CANCELLED};
 
 struct Order {
     OrderID id;
@@ -36,10 +42,20 @@ struct BookSnapshot {
     std::vector<SnapshotLevel> asks;
 };
 
+
 struct Fill {
     OrderID order_id;
     int64_t filled_quantity;
     int64_t fill_price;
+};
+
+struct FillEvent {
+    OrderID child_id;
+    VenueID venue_id;
+    int64_t filled_quantity;
+    int64_t fill_price;
+    int64_t remaining_quantity;
+    OrderStatus status;
 };
 
 enum VenueType {LIT, DARK};
@@ -47,7 +63,7 @@ enum VenueType {LIT, DARK};
 struct VenueConfig {
     VenueType type;
     double fee_per_share;
-    double latency_us;
+    int64_t latency_us;
     double impact_coefficient;
     double historical_fill_ratio;
 };
@@ -61,4 +77,20 @@ struct RouterConfig {
     int64_t lot_size;
     int64_t latency_cost_factor;
     double dark_pool_decay_rate;
+};
+
+struct BookDelta {
+    VenueID venue_id;
+    Side side;
+    int64_t price;
+    int64_t new_quantity;
+};
+
+struct OrderRequest {
+    OrderID child_id;
+    SenderType sender_type;
+    Side side;
+    OrderType order_type;
+    int64_t price;
+    int64_t quantity;
 };
