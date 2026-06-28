@@ -1,27 +1,32 @@
 #pragma once
+#include <thread>
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
+#include "common/ThreadSafeQueue.h"
 
 class Venue {
-    int venue_id;
+    VenueID venue_id;
     VenueConfig config;
     LimitOrderBook lob;
 
+    ThreadSafeQueue<OrderRequest> inbox;
+    std::thread worker_thread;
+
+    ThreadSafeQueue<BookDelta>* market_data_queue;
+    ThreadSafeQueue<FillEvent>* sor_fill_queue;
+
+    void worker_loop();
+
     public:
-        Venue(int id, const VenueConfig& cfg);
+        Venue(int id, const VenueConfig& cfg,
+            ThreadSafeQueue<BookDelta>* md_queue,
+            ThreadSafeQueue<FillEvent>* fill_queue);
+
+        void start();
 
         int get_id() const;
         VenueType get_type() const;
         const VenueConfig& get_config() const;
-        double half_spread() const;
 
-        OrderID route_order(Side side, OrderType type, int64_t price, int64_t quantity);
-
-        BookSnapshot get_venue_snapshot(int levels) const;
-
-        int64_t get_visible_liquidity(Side side, int64_t worst_price) const;
-
-        LimitOrderBook& get_raw_lob();
-
-        void set_sor_callbacks(std::function<void(Fill)> on_fill, std::function<void(BookSnapshot)> on_update);
+        void route_order(const OrderRequest& req);
 };
