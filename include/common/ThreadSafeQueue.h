@@ -25,14 +25,23 @@ class ThreadSafeQueue {
             cv.notify_one();
         }
 
-        T pop() {
+        void pop(T& out_value) {
             std::unique_lock<std::mutex> lock(mtx);
-            cv.wait(lock, [this] {return !raw_queue.empty();});
+            cv.wait(lock, [this]{return !raw_queue.empty();});
             
-            T value = std::move(raw_queue.front());
+            out_value = std::move(raw_queue.front());
             raw_queue.pop();
+        }
 
-            return value;
+        bool try_pop(T& out_value) {
+            std::lock_guard<std::mutex> lock(mtx);
+            if (raw_queue.empty()) {
+                return false;
+            }
+            
+            out_value = std::move(raw_queue.front());
+            raw_queue.pop();
+            return true;
         }
 
         bool empty() const {
