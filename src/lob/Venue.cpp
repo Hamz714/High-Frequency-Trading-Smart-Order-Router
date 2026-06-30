@@ -1,8 +1,8 @@
 #include "lob/Venue.h"
 
 Venue::Venue(int id, const VenueConfig& cfg,
-            ThreadSafeQueue<BookDelta>* md_queue,
-            ThreadSafeQueue<FillEvent>* fill_queue):
+            SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
+            SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue):
     venue_id(id), config(cfg), lob(),
     market_data_queue(md_queue), sor_fill_queue(fill_queue) {
     if (config.type == LIT) {
@@ -42,14 +42,16 @@ void Venue::route_order(const OrderRequest& req) {
 void Venue::worker_loop() {
     OrderRequest req;
     
-    while (true) {
-        inbox.pop(req);
+    while (true) { 
+        while (!inbox.try_pop(req)) {
+            _mm_pause(); 
+        }
 
         std::this_thread::sleep_for(std::chrono::microseconds(config.latency_us));
 
         std::vector<Fill> fills = lob.submit(req.side, req.order_type, req.price, req.quantity);
 
-        if (req.sender_type == SOR && sor_fill_queue != nullptr) {
+        if (req.sender_type == SenderType::SOR && sor_fill_queue != nullptr) {
             int64_t running_remaining = req.quantity;
 
             if (fills.empty()) {
@@ -60,11 +62,12 @@ void Venue::worker_loop() {
             }
 
             for (size_t i = 0; i < fills.size(); ++i) {
-                running_remaining -= fills[i].filled_quantity;
-                OrderStatus current_status = PARTIAL;
+                running_remaining -= fills[i].filled_quantity; 
+                
+                OrderStatus current_status = OrderStatus::PARTIAL;
 
                 if (i == fills.size() - 1) {
-                    current_status = (running_remaining == 0) ? FILLED : CANCELLED;
+                    current_status = (running_remaining == 0) ? OrderStatus::FILLED : CANCELLED;
                 }
 
                 sor_fill_queue->push({

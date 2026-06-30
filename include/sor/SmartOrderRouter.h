@@ -1,10 +1,21 @@
 #pragma once
 
 #include <shared_mutex>
+#include <unordered_map>
+#include <atomic>
+#include <thread>
+#include <vector>
+#include <memory>
+
 #include "common/Types.h"
-#include "DPEngine.h"
+#include "common/ThreadSafeQueue.h"
+#include "common/SPSCQueue.h"
+#include "lob/Venue.h"
+#include "sor/DPEngine.h"
+#include "common/Constants.h"
 
 class SmartOrderRouter {
+private:
     RouterConfig config;
     DPEngine dp_engine;
 
@@ -13,14 +24,13 @@ class SmartOrderRouter {
     mutable std::shared_mutex state_mutex;
 
     std::unordered_map<VenueID, LimitOrderBook> mirror_books;
-    
     std::unordered_map<OrderID, ParentOrder> active_parent_orders;
-
     std::unordered_map<OrderID, OrderID> child_to_parent;
 
     ThreadSafeQueue<OrderRequest> client_inbox;
-    ThreadSafeQueue<BookDelta> md_queue;
-    ThreadSafeQueue<FillEvent> fill_queue;
+
+    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<BookDelta, QUEUE_SIZE>>> venue_md_queues;
+    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>>> venue_fill_queues;
 
     std::atomic<bool> running;
     std::thread md_thread;
@@ -32,20 +42,16 @@ class SmartOrderRouter {
     void client_order_loop();
 
     std::vector<VenueState> build_venue_states() const;
-
     void execute_routing_decision(const ParentOrder& parent, const SplitResult& split);
 
-    public:
-        SmartOrderRouter(const RouterConfig& cfg);
-        ~SmartOrderRouter();
+public:
+    SmartOrderRouter(const RouterConfig& cfg);
+    ~SmartOrderRouter();
 
-        void add_venue(Venue* venue);
+    void add_venue(Venue* venue);
 
-        ThreadSafeQueue<BookDelta>* get_md_queue() {return &md_queue;}
-        ThreadSafeQueue<FillEvent>* get_fill_queue() {return &fill_queue;}
+    void start();
+    void stop();
 
-        void start();
-        void stop();
-
-        void submit_order(const OrderRequest& client_request);
+    void submit_order(const OrderRequest& client_request);
 };

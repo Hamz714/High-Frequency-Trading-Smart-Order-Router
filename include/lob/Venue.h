@@ -1,26 +1,29 @@
 #pragma once
+
 #include <thread>
+#include <immintrin.h>
+
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
-#include "common/ThreadSafeQueue.h"
+#include "common/SPSCQueue.h"
 
 class Venue {
     VenueID venue_id;
     VenueConfig config;
     LimitOrderBook lob;
 
-    ThreadSafeQueue<OrderRequest> inbox;
+    SPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
     std::thread worker_thread;
 
-    ThreadSafeQueue<BookDelta>* market_data_queue;
-    ThreadSafeQueue<FillEvent>* sor_fill_queue;
+    SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue;
+    SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue;
 
     void worker_loop();
 
     public:
         Venue(int id, const VenueConfig& cfg,
-            ThreadSafeQueue<BookDelta>* md_queue,
-            ThreadSafeQueue<FillEvent>* fill_queue);
+            SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
+            SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
 
         void start();
 

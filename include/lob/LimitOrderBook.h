@@ -6,10 +6,8 @@
 #include <functional>
 #include <vector>
 
-constexpr int64_t LADDER_DEPTH = 256; //must be power of 2
-constexpr int64_t MASK_MODULO = LADDER_DEPTH - 1;
+#include "common/Constants.h"
 
-constexpr int64_t SNAPSHOT_LEVELS = 5;
 
 class LimitOrderBook {
     std::array<PriceLevel, LADDER_DEPTH> bid_ladder;
