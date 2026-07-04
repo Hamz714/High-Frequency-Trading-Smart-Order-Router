@@ -1,10 +1,7 @@
 #include "lob/Venue.h"
 
-Venue::Venue(int id, const VenueConfig& cfg,
-            SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
-            SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue):
-    venue_id(id), config(cfg), lob(),
-    market_data_queue(md_queue), sor_fill_queue(fill_queue) {
+Venue::Venue(int id, const VenueConfig& cfg):
+    venue_id(id), config(cfg), lob() {
     if (config.type == LIT) {
             lob.on_book_update([this](Side side, int64_t price, int64_t new_qty) {
                 if (this->market_data_queue) {
@@ -18,6 +15,12 @@ Venue::Venue(int id, const VenueConfig& cfg,
             });
         }
     }
+
+void Venue::set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
+                    SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
+    this->market_data_queue = md_queue;
+    this->sor_fill_queue = fill_queue;
+}
 
 void Venue::start() {
     worker_thread = std::thread(&Venue::worker_loop, this);

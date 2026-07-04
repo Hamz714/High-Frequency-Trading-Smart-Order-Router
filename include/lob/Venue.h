@@ -21,9 +21,10 @@ class Venue {
     void worker_loop();
 
     public:
-        Venue(int id, const VenueConfig& cfg,
-            SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
-            SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
+        Venue(int id, const VenueConfig& cfg);
+
+        void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
+                    SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
 
         void start();
 
