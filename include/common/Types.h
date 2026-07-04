@@ -100,7 +100,7 @@ struct ParentOrder {
     Side side;
     int64_t price;
     int64_t total_qty;
-    int64_t remaining_qty;
+    int64_t filled_qty;
 };
 
 struct VenueState {

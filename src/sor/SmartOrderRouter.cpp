@@ -20,8 +20,24 @@ void SmartOrderRouter::add_venue(Venue* venue) {
     venue->set_sor_queues(venue_md_queues[id].get(), venue_fill_queues[id].get());
 }
 
+void SmartOrderRouter::initialise_venue_states() {
+    venue_states.reserve(mirror_books.size());
+    
+    for (const auto& [venue_id, lob] : mirror_books) {
+        VenueState vs;
+        vs.venue_id = venue_id;
+        vs.config = venues.at(venue_id)->get_config(); 
+        
+        vs.local_lob = &mirror_books.at(venue_id); 
+        
+        venue_states.push_back(vs);
+    }
+}
+
 void SmartOrderRouter::start() {
-    if (running.exchange(true)) return; 
+    if (running.exchange(true)) return;
+
+    initialise_venue_states();
 
     md_thread = std::thread(&SmartOrderRouter::market_data_loop, this);
     fill_thread = std::thread(&SmartOrderRouter::fill_loop, this);
@@ -38,4 +54,81 @@ void SmartOrderRouter::stop() {
 
 void SmartOrderRouter::submit_order(const OrderRequest& client_request) {
     client_inbox.push(client_request);
+}
+
+void SmartOrderRouter::market_data_loop() {
+    BookDelta delta; 
+
+    while (running.load(std::memory_order_relaxed)) {
+        bool idle = true;
+
+        for (auto& [venue_id, queue] : venue_md_queues) {
+            
+            int processed_count = 0;
+
+            while (processed_count < BATCH_LIMIT && queue->try_pop(delta)) {
+                idle = false;
+                processed_count++;
+                
+                std::unique_lock<std::shared_mutex> lock(state_mutex);
+                mirror_books[venue_id].apply_delta(delta);
+            }
+        }
+
+        if (idle) {
+            _mm_pause();
+        }
+    }
+}
+
+void SmartOrderRouter::fill_loop() {
+    FillEvent fill;
+    
+    while (running.load(std::memory_order_relaxed)) {
+        bool idle = true;
+
+        for (auto& [venue_id, queue] : venue_fill_queues) {
+            
+            int processed_count = 0;
+
+            while (processed_count < BATCH_LIMIT && queue->try_pop(fill)) {
+                idle = false;
+                processed_count++;
+                
+                std::unique_lock<std::shared_mutex> lock(state_mutex);
+
+                auto parent_it = child_to_parent.find(fill.child_id);
+                if (parent_it == child_to_parent.end()) continue; 
+
+                OrderID parent_id = parent_it->second;
+                ParentOrder& parent = active_parent_orders[parent_id];
+
+                parent.filled_qty += fill.filled_quantity;
+
+                if (fill.status == FILLED || fill.status == CANCELLED) {
+                    
+
+                    if (fill.remaining_quantity > 0) {
+                        
+                        SplitResult new_split = dp_engine.compute_optimal_split(
+                            fill.remaining_quantity, 
+                            parent.side,
+                            parent.price,
+                            venue_states
+                        );
+                        
+                        execute_routing_decision(parent, new_split);
+                    } else {
+                        active_parent_orders.erase(parent_id);
+                    }
+
+                    child_to_parent.erase(parent_it);
+                }
+            }
+        }
+
+        if (idle) {
+            _mm_pause();
+        }
+    }
 }

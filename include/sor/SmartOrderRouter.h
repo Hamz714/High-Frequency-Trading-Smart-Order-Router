@@ -32,6 +32,8 @@ private:
     std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<BookDelta, QUEUE_SIZE>>> venue_md_queues;
     std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>>> venue_fill_queues;
 
+    std::vector<VenueState> venue_states;
+
     std::atomic<bool> running;
     std::thread md_thread;
     std::thread fill_thread;
@@ -41,7 +43,7 @@ private:
     void fill_loop();
     void client_order_loop();
 
-    std::vector<VenueState> build_venue_states() const;
+    void initialise_venue_states();
     void execute_routing_decision(const ParentOrder& parent, const SplitResult& split);
 
 public:
