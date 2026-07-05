@@ -118,7 +118,9 @@ void SmartOrderRouter::fill_loop() {
                         );
                         
                         execute_routing_decision(parent, new_split);
-                    } else {
+                    }
+
+                    if (parent.filled_qty == parent.total_qty) {
                         active_parent_orders.erase(parent_id);
                     }
 
@@ -132,3 +134,64 @@ void SmartOrderRouter::fill_loop() {
         }
     }
 }
+
+void SmartOrderRouter::client_order_loop() {
+    OrderRequest req;
+    
+    while (running.load(std::memory_order_relaxed)) {
+
+        if (client_inbox.try_pop(req)) {
+            
+            std::unique_lock<std::shared_mutex> lock(state_mutex);
+
+            ParentOrder parent;
+            parent.parent_id = req.order_id;
+            parent.side = req.side;
+            parent.price = req.price;
+            parent.total_qty = req.quantity;
+            parent.filled_qty = 0;
+
+            active_parent_orders[parent.parent_id] = parent;
+
+            SplitResult split = dp_engine.compute_optimal_split(
+                req.quantity, 
+                req.side, 
+                req.price, 
+                venue_states
+            );
+
+            execute_routing_decision(active_parent_orders[parent.parent_id], split);
+            
+        } else {
+            std::this_thread::yield(); 
+        }
+    }
+}
+
+void SmartOrderRouter::execute_routing_decision(const ParentOrder& parent, const SplitResult& split) {
+                                                    
+    static std::atomic<uint64_t> child_id_generator{1000000};
+
+    for (size_t i = 0; i < split.allocations.size(); ++i) {
+        int64_t allocated_qty = split.allocations[i];
+        
+        if (allocated_qty > 0) {
+            VenueID target_venue = venue_states[i].venue_id;
+            
+            OrderID child_id = child_id_generator.fetch_add(1, std::memory_order_relaxed);
+
+            child_to_parent[child_id] = parent.parent_id;
+
+            OrderRequest child_req;
+            child_req.order_id = child_id;
+            child_req.side = parent.side;
+            child_req.order_type = IOC;
+            child_req.price = parent.price;
+            child_req.quantity = allocated_qty;
+            child_req.sender_type = SOR;
+
+            venues[target_venue]->route_order(child_req);
+        }
+    }
+}
+

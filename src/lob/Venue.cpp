@@ -59,7 +59,7 @@ void Venue::worker_loop() {
 
             if (fills.empty()) {
                 sor_fill_queue->push({
-                    req.child_id, venue_id, 0, 0, running_remaining, CANCELLED
+                    req.order_id, venue_id, 0, 0, running_remaining, CANCELLED
                 });
                 continue;
             }
@@ -74,7 +74,7 @@ void Venue::worker_loop() {
                 }
 
                 sor_fill_queue->push({
-                    req.child_id,
+                    req.order_id,
                     venue_id,
                     fills[i].filled_quantity,
                     fills[i].fill_price,

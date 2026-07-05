@@ -87,7 +87,7 @@ struct BookDelta {
 };
 
 struct OrderRequest {
-    OrderID child_id;
+    OrderID order_id;
     SenderType sender_type;
     Side side;
     OrderType order_type;
