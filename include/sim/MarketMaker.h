@@ -1,0 +1,36 @@
+#pragma once
+
+#include <cstdint>
+#include <random>
+#include <unordered_map>
+#include <atomic>
+
+#include "common/Types.h"
+#include "lob/Venue.h"
+
+class MarketMaker {
+private:
+    Venue* target_venue;
+    MarketMakerConfig config;
+    
+    std::unordered_map<OrderID, OrderRequest> active_bids;
+    std::unordered_map<OrderID, OrderRequest> active_asks;
+    
+    std::mt19937 rng;
+    std::lognormal_distribution<double> size_distribution;
+
+    std::atomic<OrderID> next_mm_id{100'000'000}; 
+
+    int64_t generate_random_quantity();
+    void post_limit_order(Side side, int64_t price, int64_t quantity);
+    void cancel_stale_orders(Side side, int64_t current_fair_value);
+    void cancel_order(const OrderID& id);
+
+public:
+    MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed = std::random_device{}());
+
+    MarketMaker(const MarketMaker&) = delete;
+    MarketMaker& operator=(const MarketMaker&) = delete;
+
+    void update(double fair_value, double volatility);
+};

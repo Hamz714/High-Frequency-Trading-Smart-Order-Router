@@ -9,8 +9,8 @@
 #include <immintrin.h>
 
 #include "common/Types.h"
-#include "common/ThreadSafeQueue.h"
 #include "common/SPSCQueue.h"
+#include "common/MPSCQueue.h"
 #include "lob/Venue.h"
 #include "sor/DPEngine.h"
 #include "common/Constants.h"
@@ -28,7 +28,7 @@ private:
     std::unordered_map<OrderID, ParentOrder> active_parent_orders;
     std::unordered_map<OrderID, OrderID> child_to_parent;
 
-    ThreadSafeQueue<OrderRequest> client_inbox;
+    MPSCQueue<OrderRequest, QUEUE_SIZE> client_inbox;
 
     std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<BookDelta, QUEUE_SIZE>>> venue_md_queues;
     std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>>> venue_fill_queues;

@@ -6,13 +6,14 @@
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
 #include "common/SPSCQueue.h"
+#include "common/MPSCQueue.h"
 
 class Venue {
     VenueID venue_id;
     VenueConfig config;
     LimitOrderBook lob;
 
-    SPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
+    MPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
     std::thread worker_thread;
 
     SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue;

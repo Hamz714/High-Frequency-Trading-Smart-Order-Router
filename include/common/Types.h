@@ -118,3 +118,12 @@ struct VenueState {
         return local_lob->half_spread(); 
     }
 };
+
+struct MarketMakerConfig {
+    int64_t base_spread;
+    double spread_sensitivity;
+    int64_t quantity_mean;
+    double quantity_variance;
+    size_t max_orders_per_side;
+    int64_t stale_distance_ticks;
+};
