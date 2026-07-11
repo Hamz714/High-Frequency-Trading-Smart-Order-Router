@@ -420,6 +420,10 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
         add_to_price_level(side, price, remaining_quantity, resting_order_id);
 
         publish_book_update(side, price, get_quantity_at_price(side, price));
+        
+        if (fills.empty()) {
+            fills.push_back({resting_order_id, 0, price});
+        }
     }
 
     return fills;

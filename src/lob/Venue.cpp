@@ -22,6 +22,10 @@ void Venue::set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
     this->sor_fill_queue = fill_queue;
 }
 
+void Venue::set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
+    this->mm_fill_queue = fill_queue;
+}
+
 void Venue::start() {
     worker_thread = std::thread(&Venue::worker_loop, this);
 }
@@ -52,6 +56,11 @@ void Venue::worker_loop() {
 
         std::this_thread::sleep_for(std::chrono::microseconds(config.latency_us));
 
+        if (req.request_type == RequestType::CANCEL) {
+            lob.cancel(req.order_id);
+            continue;
+        }
+
         std::vector<Fill> fills = lob.submit(req.side, req.order_type, req.price, req.quantity);
 
         if (req.sender_type == SenderType::SOR && sor_fill_queue != nullptr) {
@@ -59,11 +68,12 @@ void Venue::worker_loop() {
 
             if (fills.empty()) {
                 sor_fill_queue->push({
-                    req.order_id, venue_id, 0, 0, running_remaining, CANCELLED
+                    req.order_id, -1, venue_id, 0, 0, running_remaining, CANCELLED
                 });
                 continue;
             }
 
+            OrderID lob_order_id = fills[0].order_id;
             for (size_t i = 0; i < fills.size(); ++i) {
                 running_remaining -= fills[i].filled_quantity; 
                 
@@ -75,6 +85,37 @@ void Venue::worker_loop() {
 
                 sor_fill_queue->push({
                     req.order_id,
+                    lob_order_id,
+                    venue_id,
+                    fills[i].filled_quantity,
+                    fills[i].fill_price,
+                    running_remaining,
+                    current_status
+                });
+            }
+        } else if (req.sender_type == SenderType::MM && mm_fill_queue != nullptr) {
+            int64_t running_remaining = req.quantity;
+
+            if (fills.empty()) {
+                mm_fill_queue->push({
+                    req.order_id, -1, venue_id, 0, 0, running_remaining, PARTIAL
+                });
+                continue;
+            }
+
+            OrderID lob_order_id = fills[0].order_id;
+            for (size_t i = 0; i < fills.size(); ++i) {
+                running_remaining -= fills[i].filled_quantity; 
+                
+                OrderStatus current_status = OrderStatus::PARTIAL;
+
+                if (i == fills.size() - 1) {
+                    current_status = (running_remaining == 0) ? OrderStatus::FILLED : PARTIAL;
+                }
+
+                mm_fill_queue->push({
+                    req.order_id,
+                    lob_order_id,
                     venue_id,
                     fills[i].filled_quantity,
                     fills[i].fill_price,

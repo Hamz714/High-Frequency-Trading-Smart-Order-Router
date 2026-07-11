@@ -15,6 +15,8 @@ enum SenderType {SOR, MM};
 
 enum OrderStatus {PARTIAL, FILLED, CANCELLED};
 
+enum RequestType {ORDER, CANCEL};
+
 struct Order {
     OrderID id;
     int64_t price;
@@ -51,6 +53,7 @@ struct Fill {
 
 struct FillEvent {
     OrderID child_id;
+    OrderID lob_order_id;
     VenueID venue_id;
     int64_t filled_quantity;
     int64_t fill_price;
@@ -89,6 +92,7 @@ struct BookDelta {
 struct OrderRequest {
     OrderID order_id;
     SenderType sender_type;
+    RequestType request_type;
     Side side;
     OrderType order_type;
     int64_t price;

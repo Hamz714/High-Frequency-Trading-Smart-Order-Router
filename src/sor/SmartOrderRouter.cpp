@@ -189,6 +189,7 @@ void SmartOrderRouter::execute_routing_decision(const ParentOrder& parent, const
             child_req.price = parent.price;
             child_req.quantity = allocated_qty;
             child_req.sender_type = SOR;
+            child_req.request_type = RequestType::ORDER;
 
             venues[target_venue]->route_order(child_req);
         }

@@ -4,8 +4,11 @@
 #include <random>
 #include <unordered_map>
 #include <atomic>
+#include <cmath>
+#include <memory>
 
 #include "common/Types.h"
+#include "common/SPSCQueue.h"
 #include "lob/Venue.h"
 
 class MarketMaker {
@@ -16,6 +19,10 @@ private:
     std::unordered_map<OrderID, OrderRequest> active_bids;
     std::unordered_map<OrderID, OrderRequest> active_asks;
     
+    std::unordered_map<OrderID, OrderID> mm_id_to_lob_id;
+    
+    std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>> mm_fill_queue;
+    
     std::mt19937 rng;
     std::lognormal_distribution<double> size_distribution;
 
@@ -24,13 +31,14 @@ private:
     int64_t generate_random_quantity();
     void post_limit_order(Side side, int64_t price, int64_t quantity);
     void cancel_stale_orders(Side side, int64_t current_fair_value);
-    void cancel_order(const OrderID& id);
+    bool cancel_order(const OrderID& mm_id);
+    void process_fills();
 
 public:
     MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed = std::random_device{}());
 
     MarketMaker(const MarketMaker&) = delete;
     MarketMaker& operator=(const MarketMaker&) = delete;
-
+    
     void update(double fair_value, double volatility);
 };

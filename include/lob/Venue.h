@@ -18,6 +18,7 @@ class Venue {
 
     SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue;
     SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue;
+    SPSCQueue<FillEvent, QUEUE_SIZE>* mm_fill_queue;
 
     void worker_loop();
 
@@ -27,11 +28,13 @@ class Venue {
         void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
                     SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
 
+        void set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
+
         void start();
 
         int get_id() const;
         VenueType get_type() const;
         const VenueConfig& get_config() const;
 
-        void route_order(const OrderRequest& req);
+    void route_order(const OrderRequest& req);
 };
