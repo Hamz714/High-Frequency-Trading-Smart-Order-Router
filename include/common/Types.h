@@ -104,7 +104,7 @@ struct ParentOrder {
 };
 
 struct VenueState {
-    int venue_id;
+    VenueID venue_id;
     VenueConfig config;
     const LimitOrderBook* local_lob;
 

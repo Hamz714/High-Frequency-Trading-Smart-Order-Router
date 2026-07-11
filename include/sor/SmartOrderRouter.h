@@ -6,6 +6,7 @@
 #include <thread>
 #include <vector>
 #include <memory>
+#include <immintrin.h>
 
 #include "common/Types.h"
 #include "common/ThreadSafeQueue.h"

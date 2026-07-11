@@ -19,7 +19,7 @@ class LimitOrderBook {
     int64_t ask_ladder_higher;
 
     int64_t best_bid = 0;
-    int64_t best_ask = INFINITY;
+    int64_t best_ask = std::numeric_limits<int64_t>::max();
 
     std::array<int64_t, LADDER_DEPTH/64> bid_bitmask;
     std::array<int64_t, LADDER_DEPTH/64> ask_bitmask;
