@@ -107,3 +107,52 @@ void MarketMaker::process_fills() {
         }
     }
 }
+
+double MarketMaker::generate_gaussian_noise() {
+    std::uniform_real_distribution<double> uniform(-1.0, 1.0);
+    double u, v, s;
+    
+    do {
+        u = uniform(rng);
+        v = uniform(rng);
+        s = u * u + v * v;
+    } while (s >= 1.0 || s == 0.0);
+    
+    return u * std::sqrt(-2.0 * std::log(s) / s);
+}
+
+double MarketMaker::calculate_half_spread(double volatility) const {
+    return (config.base_spread / 2.0) + (volatility * config.spread_sensitivity);
+}
+
+void MarketMaker::replenish_side(Side side, int64_t fair_value_ticks, double volatility, double half_spread) {
+    auto& active_orders = (side == Side::BUY) ? active_bids : active_asks;
+    
+    while (active_orders.size() < config.max_orders_per_side) {
+        double noise = generate_gaussian_noise() * volatility;
+        int64_t target_price;
+        
+        if (side == Side::BUY) {
+            target_price = static_cast<int64_t>(std::round(fair_value_ticks - half_spread + noise));
+            target_price = std::min(target_price, fair_value_ticks - 1);
+        } else {
+            target_price = static_cast<int64_t>(std::round(fair_value_ticks + half_spread + noise));
+            target_price = std::max(target_price, fair_value_ticks + 1);
+        }
+        
+        post_limit_order(side, target_price, generate_random_quantity());
+    }
+}
+
+void MarketMaker::update(double fair_value, double volatility) {
+    process_fills(); 
+
+    int64_t fair_value_ticks = static_cast<int64_t>(std::round(fair_value));
+    cancel_stale_orders(Side::BUY, fair_value_ticks);
+    cancel_stale_orders(Side::SELL, fair_value_ticks);
+
+    double half_spread = calculate_half_spread(volatility);
+
+    replenish_side(Side::BUY, fair_value_ticks, volatility, half_spread);
+    replenish_side(Side::SELL, fair_value_ticks, volatility, half_spread);
+}

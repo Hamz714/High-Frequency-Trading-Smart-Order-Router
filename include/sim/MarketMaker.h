@@ -34,6 +34,10 @@ private:
     bool cancel_order(const OrderID& mm_id);
     void process_fills();
 
+    double generate_gaussian_noise();
+    double calculate_half_spread(double volatility) const;
+    void replenish_side(Side side, int64_t fair_value_ticks, double volatility, double half_spread);
+
 public:
     MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed = std::random_device{}());
 
