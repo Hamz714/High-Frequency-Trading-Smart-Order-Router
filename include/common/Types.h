@@ -11,7 +11,7 @@ enum Side {BUY, SELL};
 
 enum OrderType {LIMIT, MARKET, IOC, FOK};
 
-enum SenderType {SOR, MM};
+enum SenderType {SOR, MM, NOISE};
 
 enum OrderStatus {PARTIAL, FILLED, CANCELLED};
 
@@ -130,4 +130,11 @@ struct MarketMakerConfig {
     double quantity_variance;
     size_t max_orders_per_side;
     int64_t stale_distance_ticks;
+};
+
+struct NoiseTraderConfig {
+    double arrival_rate;
+    double size_mu;
+    double size_sigma;
+    double trend_sensitivity;
 };

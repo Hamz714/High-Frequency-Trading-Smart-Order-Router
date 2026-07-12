@@ -379,11 +379,11 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
-        if (side == BUY && best_ask == INT64_MAX) return fills;
-        if (side == SELL && best_bid == 0) return fills;
+        if (side == BUY && best_ask == INT64_MAX) break;
+        if (side == SELL && best_bid == 0) break;
 
         PriceLevel& next_price_level = get_best_price_level(target_side);
-        if (!valid_price(side, next_price_level.price, price)) return fills;
+        if (type != MARKET && !valid_price(side, next_price_level.price, price)) break;
 
         int64_t quantity_at_price_level = 0;
         while (remaining_quantity && next_price_level.quantity) {
