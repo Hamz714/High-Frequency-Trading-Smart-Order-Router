@@ -54,8 +54,6 @@ void Venue::worker_loop() {
             _mm_pause(); 
         }
 
-        std::this_thread::sleep_for(std::chrono::microseconds(config.latency_us));
-
         if (req.request_type == RequestType::CANCEL) {
             lob.cancel(req.order_id);
             continue;
