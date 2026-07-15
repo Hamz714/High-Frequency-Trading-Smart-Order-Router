@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <immintrin.h>
+#include <atomic>
 
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
@@ -15,6 +16,7 @@ class Venue {
 
     MPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
     std::thread worker_thread;
+    std::atomic<bool> running{false};
 
     SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue;
     SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue;
@@ -24,6 +26,7 @@ class Venue {
 
     public:
         Venue(int id, const VenueConfig& cfg);
+        ~Venue();
 
         void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
                     SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
@@ -31,6 +34,7 @@ class Venue {
         void set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
 
         void start();
+        void stop();
 
         int get_id() const;
         VenueType get_type() const;

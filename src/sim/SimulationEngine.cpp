@@ -3,6 +3,10 @@
 SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp)
     : price_process(std::move(pp)) {}
 
+SimulationEngine::~SimulationEngine() {
+    stop();
+}
+
 void SimulationEngine::add_market_maker(Venue* venue, const MarketMakerConfig& cfg) {
     market_makers.push_back(std::make_unique<MarketMaker>(venue, cfg));
 }
@@ -15,9 +19,12 @@ void SimulationEngine::add_noise_trader(Venue* venue, const NoiseTraderConfig& c
     ));
 }
 
-void SimulationEngine::run(double dt) {
-    running.store(true, std::memory_order_release);
+void SimulationEngine::start(double dt) {
+    if (running.exchange(true)) return;
+    worker_thread = std::thread(&SimulationEngine::worker_loop, this, dt);
+}
 
+void SimulationEngine::worker_loop(double dt) {
     while (running.load(std::memory_order_acquire)) {
         double current_fair_value = price_process->step();
         double volatility = price_process->get_volatility();
@@ -31,13 +38,16 @@ void SimulationEngine::run(double dt) {
         }
 
         current_time += dt;
-        
         std::this_thread::yield(); 
     }
 }
 
 void SimulationEngine::stop() {
-    running.store(false, std::memory_order_release);
+    if (running.exchange(false, std::memory_order_release)) {
+        if (worker_thread.joinable()) {
+            worker_thread.join();
+        }
+    }
 }
 
 double SimulationEngine::get_current_time() const {

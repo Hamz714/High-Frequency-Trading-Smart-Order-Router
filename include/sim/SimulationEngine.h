@@ -19,15 +19,18 @@ private:
 
     double current_time{0.0};
     std::atomic<bool> running{false};
+    std::thread worker_thread;
+
+    void worker_loop(double dt);
 
 public:
     SimulationEngine(std::unique_ptr<PriceProcess> pp);
+    ~SimulationEngine();
 
     void add_market_maker(Venue* venue, const MarketMakerConfig& cfg);
     void add_noise_trader(Venue* venue, const NoiseTraderConfig& cfg);
 
-    void run(double dt);
-    
+    void start(double dt);   
     void stop();
     
     double get_current_time() const;

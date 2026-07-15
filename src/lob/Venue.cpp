@@ -16,6 +16,10 @@ Venue::Venue(int id, const VenueConfig& cfg):
         }
     }
 
+Venue::~Venue() {
+    stop();
+}
+
 void Venue::set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
                     SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
     this->market_data_queue = md_queue;
@@ -27,7 +31,15 @@ void Venue::set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
 }
 
 void Venue::start() {
+    if (running.exchange(true)) return;
     worker_thread = std::thread(&Venue::worker_loop, this);
+}
+
+void Venue::stop() {
+    if (!running.exchange(false)) return;
+    if (worker_thread.joinable()) {
+        worker_thread.join();
+    }
 }
 
 int Venue::get_id() const {
@@ -49,8 +61,9 @@ void Venue::route_order(const OrderRequest& req) {
 void Venue::worker_loop() {
     OrderRequest req;
     
-    while (true) { 
+    while (running.load(std::memory_order_acquire)) {
         while (!inbox.try_pop(req)) {
+            if (!running.load(std::memory_order_acquire)) return;
             _mm_pause(); 
         }
 
