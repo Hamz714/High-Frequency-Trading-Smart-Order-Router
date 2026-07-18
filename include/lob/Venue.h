@@ -9,6 +9,22 @@
 #include "common/SPSCQueue.h"
 #include "common/MPSCQueue.h"
 
+struct VenueState {
+    VenueID venue_id;
+    VenueConfig config;
+    const LimitOrderBook* local_lob;
+
+    int64_t get_visible_liquidity(Side side, int64_t worst_price) const {
+        if (!local_lob || config.type == DARK) return 0;
+        return local_lob->available_liquidity(side, worst_price); 
+    }
+
+    double half_spread() const {
+        if (!local_lob) return 0.0;
+        return local_lob->half_spread(); 
+    }
+};
+
 class Venue {
     VenueID venue_id;
     VenueConfig config;

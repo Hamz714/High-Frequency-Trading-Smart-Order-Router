@@ -1,4 +1,6 @@
 #pragma once
+#include <cmath>
+
 #include "common/Types.h"
 #include "lob/Venue.h"
 
