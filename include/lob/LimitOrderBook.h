@@ -65,6 +65,10 @@ class LimitOrderBook {
 
         double half_spread() const;
 
+        int64_t get_best_bid() const;
+
+        int64_t get_best_ask() const;
+
         void on_book_update(std::function<void(Side, int64_t, int64_t)> callback);
 
         int64_t get_quantity_at_price(Side side, int64_t price) const;

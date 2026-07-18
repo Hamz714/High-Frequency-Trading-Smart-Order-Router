@@ -130,3 +130,37 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
 
     return result;
 }
+
+SplitResult DPEngine::compute_naive_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues) {
+    SplitResult result;
+    result.allocations.assign(venues.size(), 0);
+    result.expected_cost = std::numeric_limits<double>::max();
+
+    int best_index = -1;
+    int64_t best_price = (side == BUY) ? std::numeric_limits<int64_t>::max() : 0;
+
+    for (int i = 0; i < venues.size(); ++i) {
+        if (venues[i].config.type != LIT) continue;
+
+        if (side == BUY) {
+            int64_t ask = venues[i].get_best_ask();
+            if (ask < best_price) {
+                best_price = ask;
+                best_index = i;
+            }
+        } else {
+            int64_t bid = venues[i].get_best_bid();
+            if (bid > best_price) {
+                best_price = bid;
+                best_index = i;
+            }
+        }
+    }
+
+    if (best_index == -1) return result;
+
+    result.allocations[best_index] = total_size;
+    result.expected_cost = calculate_lit_cost(venues[best_index], side, total_size, worst_price);
+
+    return result;
+}

@@ -21,7 +21,17 @@ struct VenueState {
 
     double half_spread() const {
         if (!local_lob) return 0.0;
-        return local_lob->half_spread(); 
+        return local_lob->half_spread();
+    }
+
+    int64_t get_best_bid() const {
+        if (!local_lob || config.type == DARK) return 0;
+        return local_lob->get_best_bid();
+    }
+
+    int64_t get_best_ask() const {
+        if (!local_lob || config.type == DARK) return std::numeric_limits<int64_t>::max();
+        return local_lob->get_best_ask();
     }
 };
 
