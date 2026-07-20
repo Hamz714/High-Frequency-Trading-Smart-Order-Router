@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <deque>
 #include <vector>
+#include <unordered_map>
 
 using OrderID = int64_t;
 
@@ -28,10 +29,10 @@ struct Order {
 };
 
 struct PriceLevel {
-    int64_t price;
-    int64_t quantity;
-    int32_t head_order_index;
-    int32_t tail_order_index;
+    int64_t price = 0;
+    int64_t quantity = 0;
+    int32_t head_order_index = -1;
+    int32_t tail_order_index = -1;
 };
 
 struct SnapshotLevel {
@@ -80,6 +81,8 @@ struct RouterConfig {
     int64_t lot_size;
     int64_t latency_cost_factor;
     double dark_pool_decay_rate;
+    bool use_naive_split;
+    int max_reroute_attempts;
 };
 
 struct BookDelta {
@@ -105,6 +108,8 @@ struct ParentOrder {
     int64_t price;
     int64_t total_qty;
     int64_t filled_qty;
+    double decision_time;
+    int reroute_count;
 };
 
 struct MarketMakerConfig {
@@ -121,4 +126,57 @@ struct NoiseTraderConfig {
     double size_mu;
     double size_sigma;
     double trend_sensitivity;
+};
+
+struct TradeEvent {
+    VenueID venue_id;
+    Side side;
+    int64_t price;
+    int64_t quantity;
+    double timestamp;
+    SenderType sender_type;
+};
+
+enum class OrderEventType { DECISION, FILL, COMPLETION };
+
+struct OrderLifecycleEvent {
+    OrderEventType type;
+    OrderID parent_id;
+    Side side;
+    int64_t quantity;
+    double price;
+    VenueID venue_id;
+    double timestamp;
+    bool timed_out;
+};
+
+struct VenueStats {
+    int64_t filled_qty = 0;
+    double total_notional = 0.0;
+    int fill_count = 0;
+};
+
+struct PendingOrder {
+    Side side;
+    int64_t intended_qty;
+    double decision_price;
+    double decision_time;
+    int64_t filled_qty = 0;
+    double filled_notional = 0.0;
+    std::unordered_map<VenueID, VenueStats> venue_breakdown;
+};
+
+struct ExecutionReport {
+    OrderID parent_id;
+    Side side;
+    int64_t intended_size;
+    int64_t filled_size;
+    double fill_rate;
+    double avg_fill_price;
+    double decision_price;
+    double implementation_shortfall;
+    double vwap_slippage;
+    double window_vwap;
+    bool timed_out;
+    std::unordered_map<VenueID, VenueStats> venue_breakdown;
 };
