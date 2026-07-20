@@ -28,6 +28,8 @@ class LimitOrderBook {
     std::map<int64_t, PriceLevel, std::greater<int64_t>> bid_overflow;
     std::map<int64_t, PriceLevel> ask_overflow;
 
+    PriceLevel empty_level_scratch;
+
     int64_t next_order_index = 1;
 
     std::vector<Order> global_order_pool{10'000'000};

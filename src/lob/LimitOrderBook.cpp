@@ -1,14 +1,22 @@
 #include "lob/LimitOrderBook.h"
 
 PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
-    if (side == BUY) {
+    if (side == SELL) {
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
             return ask_ladder[best_ask & MASK_MODULO];
+        }
+        if (ask_overflow.empty()) {
+            empty_level_scratch = PriceLevel{best_ask, 0, -1, -1};
+            return empty_level_scratch;
         }
         return ask_overflow.begin()->second;
     } else {
         if (best_bid >= bid_ladder_lower && best_bid <= bid_ladder_higher) {
             return bid_ladder[best_bid & MASK_MODULO];
+        }
+        if (bid_overflow.empty()) {
+            empty_level_scratch = PriceLevel{best_bid, 0, -1, -1};
+            return empty_level_scratch;
         }
         return bid_overflow.begin()->second;
     }
@@ -29,9 +37,9 @@ void LimitOrderBook::remove_price_level(Side side, int64_t price) {
     int64_t word_index = global_index / 64;
     int64_t bit_index = global_index % 64;
 
-    if (side == BUY) {
+    if (side == SELL) {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
-            ask_bitmask[word_index] &= ~(1ULL << bit_index); 
+            ask_bitmask[word_index] &= ~(1ULL << bit_index);
         } else {
             ask_overflow.erase(price);
         }
@@ -183,16 +191,7 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
     int64_t order_index = order_id & 0xFFFFFFFF;
     global_order_pool[order_index] = order;
 
-    PriceLevel* price_level = nullptr;
-    
     if (side == SELL) {
-        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
-            price_level = &ask_ladder[global_index];
-            ask_bitmask[word_index] |= 1ULL << bit_index;
-        } else {
-            price_level = &ask_overflow[price];
-        }
-
         if (price < best_ask) {
             best_ask = price;
             int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
@@ -201,13 +200,6 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
             }
         }
     } else {
-        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
-            price_level = &bid_ladder[global_index];
-            bid_bitmask[word_index] |= 1ULL << bit_index;
-        } else {
-            price_level = &bid_overflow[price];
-        }
-
         if (price > best_bid) {
             best_bid = price;
             int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
@@ -217,10 +209,29 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
         }
     }
 
-    global_order_pool[order_index].prev_index = price_level->tail_order_index;
+    PriceLevel* price_level = nullptr;
+
+    if (side == SELL) {
+        if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
+            price_level = &ask_ladder[global_index];
+            ask_bitmask[word_index] |= 1ULL << bit_index;
+        } else {
+            price_level = &ask_overflow[price];
+        }
+    } else {
+        if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
+            price_level = &bid_ladder[global_index];
+            bid_bitmask[word_index] |= 1ULL << bit_index;
+        } else {
+            price_level = &bid_overflow[price];
+        }
+    }
+
+    int64_t previous_tail = price_level->tail_order_index;
+    global_order_pool[order_index].prev_index = previous_tail;
     price_level->tail_order_index = order_index;
-    if (price_level->tail_order_index != -1) {
-        global_order_pool[price_level->tail_order_index].next_index = order_index;
+    if (previous_tail != -1) {
+        global_order_pool[previous_tail].next_index = order_index;
     } else {
         price_level->head_order_index = order_index;
     }
@@ -393,7 +404,13 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
             if (remaining_quantity >= next_book_order.quantity) {
                 matched_quantity = next_book_order.quantity;
                 next_book_order.is_active = false;
-                next_price_level.head_order_index = next_book_order.next_index;
+                int32_t new_head = next_book_order.next_index;
+                next_price_level.head_order_index = new_head;
+                if (new_head != -1) {
+                    global_order_pool[new_head].prev_index = -1;
+                } else {
+                    next_price_level.tail_order_index = -1;
+                }
             } else {
                 matched_quantity = remaining_quantity;
             }
