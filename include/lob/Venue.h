@@ -8,6 +8,7 @@
 #include "lob/LimitOrderBook.h"
 #include "common/SPSCQueue.h"
 #include "common/MPSCQueue.h"
+#include "common/SimClock.h"
 
 struct VenueState {
     VenueID venue_id;
@@ -48,16 +49,23 @@ class Venue {
     SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue;
     SPSCQueue<FillEvent, QUEUE_SIZE>* mm_fill_queue;
 
+    MPSCQueue<TradeEvent, QUEUE_SIZE>* analytics_trade_queue = nullptr;
+    const SimClock* clock = nullptr;
+
     void worker_loop();
 
     public:
         Venue(int id, const VenueConfig& cfg);
         ~Venue();
 
-        void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
+        void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
                     SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
 
         void set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
+
+        void set_analytics_queue(MPSCQueue<TradeEvent, QUEUE_SIZE>* trade_queue);
+
+        void set_clock(const SimClock* c);
 
         void start();
         void stop();

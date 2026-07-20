@@ -30,6 +30,14 @@ void Venue::set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
     this->mm_fill_queue = fill_queue;
 }
 
+void Venue::set_analytics_queue(MPSCQueue<TradeEvent, QUEUE_SIZE>* trade_queue) {
+    this->analytics_trade_queue = trade_queue;
+}
+
+void Venue::set_clock(const SimClock* c) {
+    this->clock = c;
+}
+
 void Venue::start() {
     if (running.exchange(true)) return;
     worker_thread = std::thread(&Venue::worker_loop, this);
@@ -73,6 +81,15 @@ void Venue::worker_loop() {
         }
 
         std::vector<Fill> fills = lob.submit(req.side, req.order_type, req.price, req.quantity);
+
+        if (analytics_trade_queue != nullptr) {
+            double timestamp = clock ? clock->now() : 0.0;
+            for (const Fill& fill : fills) {
+                analytics_trade_queue->push({
+                    venue_id, req.side, fill.fill_price, fill.filled_quantity, timestamp, req.sender_type
+                });
+            }
+        }
 
         if (req.sender_type == SenderType::SOR && sor_fill_queue != nullptr) {
             int64_t running_remaining = req.quantity;
