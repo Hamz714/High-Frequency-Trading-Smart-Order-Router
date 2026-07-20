@@ -35,7 +35,7 @@ private:
     void process_fills();
 
     double generate_gaussian_noise();
-    double calculate_half_spread(double volatility) const;
+    double calculate_half_spread(int64_t fair_value_ticks, double volatility) const;
     void replenish_side(Side side, int64_t fair_value_ticks, double volatility, double half_spread);
 
 public:

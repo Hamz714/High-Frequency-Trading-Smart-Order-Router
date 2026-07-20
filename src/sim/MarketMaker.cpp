@@ -121,15 +121,19 @@ double MarketMaker::generate_gaussian_noise() {
     return u * std::sqrt(-2.0 * std::log(s) / s);
 }
 
-double MarketMaker::calculate_half_spread(double volatility) const {
-    return (config.base_spread / 2.0) + (volatility * config.spread_sensitivity);
+double MarketMaker::calculate_half_spread(int64_t fair_value_ticks, double volatility) const {
+    double vol_ticks = fair_value_ticks * volatility;
+    return (config.base_spread / 2.0) + (vol_ticks * config.spread_sensitivity);
 }
 
 void MarketMaker::replenish_side(Side side, int64_t fair_value_ticks, double volatility, double half_spread) {
     auto& active_orders = (side == Side::BUY) ? active_bids : active_asks;
-    
+
+    double vol_ticks = fair_value_ticks * volatility;
+    double dispersion = (config.stale_distance_ticks / 2.0) + vol_ticks * config.spread_sensitivity;
+
     while (active_orders.size() < config.max_orders_per_side) {
-        double noise = generate_gaussian_noise() * volatility;
+        double noise = generate_gaussian_noise() * dispersion;
         int64_t target_price;
         
         if (side == Side::BUY) {
@@ -151,7 +155,7 @@ void MarketMaker::update(double fair_value, double volatility) {
     cancel_stale_orders(Side::BUY, fair_value_ticks);
     cancel_stale_orders(Side::SELL, fair_value_ticks);
 
-    double half_spread = calculate_half_spread(volatility);
+    double half_spread = calculate_half_spread(fair_value_ticks, volatility);
 
     replenish_side(Side::BUY, fair_value_ticks, volatility, half_spread);
     replenish_side(Side::SELL, fair_value_ticks, volatility, half_spread);
