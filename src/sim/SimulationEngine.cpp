@@ -1,21 +1,22 @@
 #include "sim/SimulationEngine.h"
 
-SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp)
-    : price_process(std::move(pp)) {}
+SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock)
+    : price_process(std::move(pp)), clock(clock) {}
 
 SimulationEngine::~SimulationEngine() {
     stop();
 }
 
-void SimulationEngine::add_market_maker(Venue* venue, const MarketMakerConfig& cfg) {
-    market_makers.push_back(std::make_unique<MarketMaker>(venue, cfg));
+void SimulationEngine::add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed) {
+    market_makers.push_back(std::make_unique<MarketMaker>(venue, cfg, seed));
 }
 
-void SimulationEngine::add_noise_trader(Venue* venue, const NoiseTraderConfig& cfg) {
+void SimulationEngine::add_noise_trader(Venue* venue, const NoiseTraderConfig& cfg, uint32_t seed) {
     noise_traders.push_back(std::make_unique<NoiseTrader>(
-        venue, 
-        cfg, 
-        price_process->get_current_price()
+        venue,
+        cfg,
+        price_process->get_current_price(),
+        seed
     ));
 }
 
@@ -37,8 +38,8 @@ void SimulationEngine::worker_loop(double dt) {
             nt->update(dt, current_fair_value);
         }
 
-        current_time += dt;
-        std::this_thread::yield(); 
+        clock->advance(dt);
+        std::this_thread::yield();
     }
 }
 
@@ -48,8 +49,4 @@ void SimulationEngine::stop() {
             worker_thread.join();
         }
     }
-}
-
-double SimulationEngine::get_current_time() const {
-    return current_time;
 }
