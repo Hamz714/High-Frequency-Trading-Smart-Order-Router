@@ -15,6 +15,7 @@
 #include "lob/Venue.h"
 #include "sor/DPEngine.h"
 #include "common/Constants.h"
+#include "common/SimClock.h"
 
 class SmartOrderRouter {
 private:
@@ -36,6 +37,9 @@ private:
 
     std::vector<VenueState> venue_states;
 
+    const SimClock* clock = nullptr;
+    SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* analytics_queue = nullptr;
+
     std::atomic<bool> running;
     std::thread md_thread;
     std::thread fill_thread;
@@ -46,13 +50,18 @@ private:
     void client_order_loop();
 
     void initialise_venue_states();
-    void execute_routing_decision(const ParentOrder& parent, const SplitResult& split);
+    int64_t execute_routing_decision(const ParentOrder& parent, const SplitResult& split);
+    SplitResult compute_split(int64_t size, Side side, int64_t worst_price);
+    double compute_consolidated_mid() const;
 
 public:
     SmartOrderRouter(const RouterConfig& cfg);
     ~SmartOrderRouter();
 
     void add_venue(Venue* venue);
+
+    void set_clock(const SimClock* c);
+    void set_analytics_queue(SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* queue);
 
     void start();
     void stop();
