@@ -15,3 +15,9 @@ file(GLOB_RECURSE SOURCES
 
 # Create the executable
 add_executable(high_frequency ${SOURCES})
+
+option(BUILD_TESTS "Build unit tests" ON)
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()

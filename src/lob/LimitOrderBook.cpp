@@ -382,7 +382,7 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
     Side target_side = (side == BUY) ? SELL : BUY;
 
     if (type == FOK) {
-        int64_t liquidity = available_liquidity(target_side, price);
+        int64_t liquidity = available_liquidity(side, price);
         if (liquidity < quantity) { return std::vector<Fill>{}; }
     }
 
@@ -437,10 +437,8 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
         add_to_price_level(side, price, remaining_quantity, resting_order_id);
 
         publish_book_update(side, price, get_quantity_at_price(side, price));
-        
-        if (fills.empty()) {
-            fills.push_back({resting_order_id, 0, price});
-        }
+
+        fills.push_back({resting_order_id, 0, price});
     }
 
     return fills;
@@ -522,12 +520,6 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                 int next_word_index = (word_index + i) % ask_bitmask.size();
                 uint64_t word = ask_bitmask[next_word_index];
 
-                int64_t window_top_word_index = (ask_ladder_higher & MASK_MODULO) / 64;
-                if (next_word_index == window_top_word_index) {
-                    int64_t window_top_bit_index = (ask_ladder_higher & MASK_MODULO) % 64;
-                    word &= (~0ULL) >> (63 - window_top_bit_index);
-                }
-
                 while (word != 0 && book_snapshot.asks.size() < max_levels) {
                     int active_bit = __builtin_ctzll(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
@@ -537,8 +529,6 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
 
                     word &= ~(1ULL << active_bit);
                 }
-
-                if (next_word_index == window_top_word_index) break;
             }
         }
 
@@ -556,23 +546,15 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                 int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
                 uint64_t word = bid_bitmask[next_word_index];
 
-                int64_t window_bottom_word_index = (bid_ladder_lower & MASK_MODULO) / 64;
-                if (next_word_index == window_bottom_word_index) {
-                    int64_t window_bottom_bit_index = (bid_ladder_lower & MASK_MODULO) % 64;
-                    word &= (~0ULL) << window_bottom_bit_index;
-                }
-
                 while (word != 0 && book_snapshot.bids.size() < max_levels) {
                     int active_bit = 63 - __builtin_clzll(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
-                    
+
                     SnapshotLevel snapshot_level = SnapshotLevel{bid_ladder[exact_index].price, bid_ladder[exact_index].quantity};
                     book_snapshot.bids.push_back(snapshot_level);
 
                     word &= ~(1ULL << active_bit);
                 }
-
-                if (next_word_index == window_bottom_word_index) break;
             }
         }
 
@@ -597,17 +579,9 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
             int64_t global_index = best_ask & MASK_MODULO;
             int64_t word_index = global_index / 64;
 
-            int64_t window_top_word_index = (ask_ladder_higher & MASK_MODULO) / 64;
-            int64_t window_top_bit_index = (ask_ladder_higher & MASK_MODULO) % 64;
-            uint64_t top_seam_mask = (~0ULL) >> (63 - window_top_bit_index);
-
             for (int i = 0; i < ask_bitmask.size(); i++) {
                 int next_word_index = (word_index + i) % ask_bitmask.size();
                 uint64_t word = ask_bitmask[next_word_index];
-
-                if (next_word_index == window_top_word_index) {
-                    word &= top_seam_mask;
-                }
 
                 while (word != 0) {
                     int active_bit = __builtin_ctzll(word);
@@ -615,14 +589,12 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
                     int64_t price = ask_ladder[exact_index].price;
 
                     if (price > worst_price) {
-                        return total_quantity; 
+                        return total_quantity;
                     }
 
                     total_quantity += ask_ladder[exact_index].quantity;
                     word &= ~(1ULL << active_bit);
                 }
-
-                if (next_word_index == window_top_word_index) break;
             }
         }
 
@@ -643,20 +615,12 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
             int64_t global_index = best_bid & MASK_MODULO;
             int64_t word_index = global_index / 64;
 
-            int64_t window_bottom_word_index = (bid_ladder_lower & MASK_MODULO) / 64;
-            int64_t window_bottom_bit_index = (bid_ladder_lower & MASK_MODULO) % 64;
-            uint64_t bottom_seam_mask = (~0ULL) << window_bottom_bit_index;
-
             for (int i = 0; i < bid_bitmask.size(); i++) {
                 int next_word_index = (word_index - i + bid_bitmask.size()) % bid_bitmask.size();
                 uint64_t word = bid_bitmask[next_word_index];
 
-                if (next_word_index == window_bottom_word_index) {
-                    word &= bottom_seam_mask;
-                }
-
                 while (word != 0) {
-                    int active_bit = 63 - __builtin_clzll(word); 
+                    int active_bit = 63 - __builtin_clzll(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
                     int64_t price = bid_ladder[exact_index].price;
 
@@ -667,8 +631,6 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
                     total_quantity += bid_ladder[exact_index].quantity;
                     word &= ~(1ULL << active_bit);
                 }
-
-                if (next_word_index == window_bottom_word_index) break;
             }
         }
 
@@ -705,7 +667,7 @@ int64_t LimitOrderBook::get_quantity_at_price(Side side, int64_t price) const {
 
 double LimitOrderBook::half_spread() const {
     if (best_ask == INT64_MAX || best_bid == 0) return 0.0;
-    return (best_ask - best_bid) / 2;
+    return (best_ask - best_bid) / 2.0;
 }
 
 int64_t LimitOrderBook::get_best_bid() const {

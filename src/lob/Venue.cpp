@@ -91,6 +91,10 @@ void Venue::worker_loop() {
             }
         }
 
+        OrderID lob_order_id = (!fills.empty() && fills.back().filled_quantity == 0)
+            ? fills.back().order_id
+            : -1;
+
         if (req.sender_type == SenderType::SOR && sor_fill_queue != nullptr) {
             int64_t running_remaining = req.quantity;
 
@@ -101,14 +105,17 @@ void Venue::worker_loop() {
                 continue;
             }
 
-            OrderID lob_order_id = fills[0].order_id;
             for (size_t i = 0; i < fills.size(); ++i) {
-                running_remaining -= fills[i].filled_quantity; 
-                
+                running_remaining -= fills[i].filled_quantity;
+
                 OrderStatus current_status = OrderStatus::PARTIAL;
 
                 if (i == fills.size() - 1) {
-                    current_status = (running_remaining == 0) ? OrderStatus::FILLED : CANCELLED;
+                    if (running_remaining == 0) {
+                        current_status = OrderStatus::FILLED;
+                    } else {
+                        current_status = (lob_order_id != -1) ? OrderStatus::PARTIAL : OrderStatus::CANCELLED;
+                    }
                 }
 
                 sor_fill_queue->push({
@@ -131,10 +138,9 @@ void Venue::worker_loop() {
                 continue;
             }
 
-            OrderID lob_order_id = fills[0].order_id;
             for (size_t i = 0; i < fills.size(); ++i) {
-                running_remaining -= fills[i].filled_quantity; 
-                
+                running_remaining -= fills[i].filled_quantity;
+
                 OrderStatus current_status = OrderStatus::PARTIAL;
 
                 if (i == fills.size() - 1) {
