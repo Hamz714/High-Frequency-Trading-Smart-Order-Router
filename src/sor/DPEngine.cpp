@@ -136,12 +136,14 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
     if (remainder > 0 && !result.allocations.empty()) {
         double best_cost = INF;
         size_t best_index = 0;
+        bool found_viable_venue = false;
 
         for (const auto& [venue, index] : lit_venues) {
             double cost = calculate_lit_cost(*venue, side, remainder, worst_price);
             if (cost < best_cost) {
                 best_cost = cost;
                 best_index = index;
+                found_viable_venue = true;
             }
         }
 
@@ -150,10 +152,13 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
             if (cost < best_cost) {
                 best_cost = cost;
                 best_index = index;
+                found_viable_venue = true;
             }
         }
 
-        result.allocations[best_index] += remainder;
+        if (found_viable_venue) {
+            result.allocations[best_index] += remainder;
+        }
     }
 
     return result;

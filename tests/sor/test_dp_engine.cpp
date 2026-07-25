@@ -211,6 +211,18 @@ TEST(DPEngineOptimalSplitTest, RemainderGoesToVenueCheapestForThatSmallAmount) {
     EXPECT_EQ(result.allocations[1], 105);
 }
 
+TEST(DPEngineOptimalSplitTest, RemainderIsNotAllocated_WhenNoVenueCanAbsorbIt) {
+    LimitOrderBook empty_lob;
+
+    VenueConfig cfg = make_venue_config(LIT);
+    std::vector<VenueState> venues{VenueState{1, cfg, &empty_lob}};
+
+    DPEngine engine(make_router_config(10));
+    SplitResult result = engine.compute_optimal_split(5, BUY, 200, venues);
+
+    EXPECT_EQ(result.allocations[0], 0);
+}
+
 TEST(DPEngineOptimalSplitTest, ZeroTotalSize_ReturnsZeroCostAndZeroAllocations) {
     LimitOrderBook lob;
     lob.submit(SELL, LIMIT, 100, 100000);
