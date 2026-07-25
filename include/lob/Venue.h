@@ -45,9 +45,9 @@ class Venue {
     std::thread worker_thread;
     std::atomic<bool> running{false};
 
-    SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE>* mm_fill_queue;
+    SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue = nullptr;
+    SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue = nullptr;
+    SPSCQueue<FillEvent, QUEUE_SIZE>* mm_fill_queue = nullptr;
 
     MPSCQueue<TradeEvent, QUEUE_SIZE>* analytics_trade_queue = nullptr;
     const SimClock* clock = nullptr;
