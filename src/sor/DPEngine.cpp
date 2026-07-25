@@ -4,6 +4,8 @@ DPEngine::DPEngine(const RouterConfig& cfg):
     config(cfg) {}
 
 double DPEngine::calculate_lit_cost(const VenueState& venue, Side side, int64_t quantity, int64_t worst_price) const {;
+    if (quantity == 0) return 0.0;
+
     int64_t visible_liquidity = venue.get_visible_liquidity(side, worst_price);
 
     if (visible_liquidity == 0) {return std::numeric_limits<double>::max();}
@@ -17,6 +19,8 @@ double DPEngine::calculate_lit_cost(const VenueState& venue, Side side, int64_t 
 }
 
 double DPEngine::calculate_dark_cost(const VenueState& venue, int64_t quantity, const std::vector<double>& lit_dp_table) const {
+    if (quantity == 0) return 0.0;
+
     double p_fill = estimate_dark_fill_ratio(venue, quantity);
 
     double fee_cost = venue.config.fee_per_share * quantity;
@@ -126,6 +130,30 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
 
         result.allocations[index] = lots_to_send * config.lot_size;
         remaining_lots -= lots_to_send;
+    }
+
+    int64_t remainder = total_size % config.lot_size;
+    if (remainder > 0 && !result.allocations.empty()) {
+        double best_cost = INF;
+        size_t best_index = 0;
+
+        for (const auto& [venue, index] : lit_venues) {
+            double cost = calculate_lit_cost(*venue, side, remainder, worst_price);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_index = index;
+            }
+        }
+
+        for (const auto& [venue, index] : dark_venues) {
+            double cost = calculate_dark_cost(*venue, remainder, lit_dp_table);
+            if (cost < best_cost) {
+                best_cost = cost;
+                best_index = index;
+            }
+        }
+
+        result.allocations[best_index] += remainder;
     }
 
     return result;
