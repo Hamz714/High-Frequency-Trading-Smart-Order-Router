@@ -1,7 +1,5 @@
 #include "analytics/AnalyticsEngine.h"
 
-#include <iostream>
-#include <iomanip>
 #include <immintrin.h>
 
 AnalyticsEngine::AnalyticsEngine() {}
@@ -12,6 +10,10 @@ AnalyticsEngine::~AnalyticsEngine() {
 
 void AnalyticsEngine::set_clock(const SimClock* c) {
     this->clock = c;
+}
+
+void AnalyticsEngine::on_report(std::function<void(const ExecutionReport&)> cb) {
+    report_callback = std::move(cb);
 }
 
 MPSCQueue<TradeEvent, QUEUE_SIZE>* AnalyticsEngine::get_trade_inbox() {
@@ -153,40 +155,10 @@ void AnalyticsEngine::finalize_report(OrderID parent_id, bool timed_out) {
     report.implementation_shortfall = side_sign * (report.avg_fill_price - report.decision_price) * static_cast<double>(report.filled_size);
     report.vwap_slippage = side_sign * (report.avg_fill_price - report.window_vwap);
 
-    print_report(report);
+    if (report_callback) {
+        report_callback(report);
+    }
 
     pending_orders.erase(it);
     trim_trade_buffer();
-}
-
-void AnalyticsEngine::print_report(const ExecutionReport& report) const {
-    std::cout << "\n[ ANALYTICS      ] Execution Report for Order " << report.parent_id << "\n";
-    std::cout << "  Side:                     " << (report.side == Side::BUY ? "BUY" : "SELL") << "\n";
-    std::cout << "  Intended / Filled:        " << report.intended_size << " / " << report.filled_size << "\n";
-    std::cout << "  Fill Rate:                " << std::fixed << std::setprecision(2) << (report.fill_rate * 100.0) << "%\n";
-    std::cout << "  Decision Price:           " << report.decision_price << "\n";
-    std::cout << "  Avg Fill Price:           " << report.avg_fill_price << "\n";
-    std::cout << "  Window VWAP:              " << report.window_vwap << "\n";
-    std::cout << "  Implementation Shortfall: " << report.implementation_shortfall << "\n";
-    std::cout << "  VWAP Slippage:            " << report.vwap_slippage << "\n";
-    std::cout << "  Timed Out:                " << (report.timed_out ? "yes" : "no") << "\n";
-    std::cout << "  Venue Breakdown:\n";
-    for (const auto& [venue_id, stats] : report.venue_breakdown) {
-        double avg_price = stats.filled_qty > 0 ? stats.total_notional / static_cast<double>(stats.filled_qty) : 0.0;
-        std::cout << "    Venue " << venue_id << ": qty=" << stats.filled_qty
-                  << " fills=" << stats.fill_count << " avg_price=" << avg_price << "\n";
-    }
-
-    std::cout << "RESULT,parent_id=" << report.parent_id
-              << ",side=" << (report.side == Side::BUY ? "BUY" : "SELL")
-              << ",intended=" << report.intended_size
-              << ",filled=" << report.filled_size
-              << ",fill_rate=" << report.fill_rate
-              << ",decision_price=" << report.decision_price
-              << ",avg_fill_price=" << report.avg_fill_price
-              << ",window_vwap=" << report.window_vwap
-              << ",implementation_shortfall=" << report.implementation_shortfall
-              << ",vwap_slippage=" << report.vwap_slippage
-              << ",timed_out=" << (report.timed_out ? 1 : 0)
-              << "\n";
 }

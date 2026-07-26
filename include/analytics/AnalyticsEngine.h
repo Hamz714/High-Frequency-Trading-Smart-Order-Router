@@ -3,6 +3,7 @@
 #include <atomic>
 #include <thread>
 #include <deque>
+#include <functional>
 #include <unordered_map>
 
 #include "common/Types.h"
@@ -23,19 +24,21 @@ private:
     std::atomic<bool> running{false};
     std::thread worker_thread;
     const SimClock* clock = nullptr;
+    std::function<void(const ExecutionReport&)> report_callback;
 
     void worker_loop();
     void handle_trade(const TradeEvent& trade);
     void handle_order_event(const OrderLifecycleEvent& event);
     void finalize_report(OrderID parent_id, bool timed_out);
     void trim_trade_buffer();
-    void print_report(const ExecutionReport& report) const;
 
 public:
     AnalyticsEngine();
     ~AnalyticsEngine();
 
     void set_clock(const SimClock* c);
+
+    void on_report(std::function<void(const ExecutionReport&)> cb);
 
     MPSCQueue<TradeEvent, QUEUE_SIZE>* get_trade_inbox();
     SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* get_order_inbox();

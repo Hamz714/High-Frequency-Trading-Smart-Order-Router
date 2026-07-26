@@ -1,52 +1,30 @@
 #include <gtest/gtest.h>
 #include <chrono>
-#include <iostream>
-#include <limits>
 #include <mutex>
-#include <sstream>
-#include <string>
 #include <thread>
+#include <unordered_map>
 
 #include "analytics/AnalyticsEngine.h"
 #include "common/SimClock.h"
 
 namespace {
 
-class ThreadSafeStreamBuf : public std::streambuf {
-public:
-    std::string str_safe() {
-        std::lock_guard<std::mutex> lock(mutex_);
-        return buffer_;
-    }
-
-protected:
-    int_type overflow(int_type ch) override {
-        if (ch != traits_type::eof()) {
-            std::lock_guard<std::mutex> lock(mutex_);
-            buffer_.push_back(static_cast<char>(ch));
-        }
-        return ch;
-    }
-
-private:
-    std::mutex mutex_;
-    std::string buffer_;
-};
-
 class AnalyticsEngineTest : public ::testing::Test {
 protected:
     AnalyticsEngine engine;
-    ThreadSafeStreamBuf captured;
-    std::streambuf* original_cout_buf = nullptr;
+    std::mutex reports_mutex;
+    std::unordered_map<OrderID, ExecutionReport> reports;
 
     void SetUp() override {
-        original_cout_buf = std::cout.rdbuf(&captured);
+        engine.on_report([this](const ExecutionReport& report) {
+            std::lock_guard<std::mutex> lock(reports_mutex);
+            reports[report.parent_id] = report;
+        });
         engine.start();
     }
 
     void TearDown() override {
         engine.stop();
-        std::cout.rdbuf(original_cout_buf);
     }
 
     void push_trade(VenueID venue, Side side, int64_t price, int64_t qty, double ts) {
@@ -100,46 +78,25 @@ protected:
     }
 
     bool wait_for_report(OrderID parent_id, std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
-        std::string marker = "RESULT,parent_id=" + std::to_string(parent_id) + ",";
         auto deadline = std::chrono::steady_clock::now() + timeout;
         while (std::chrono::steady_clock::now() < deadline) {
-            std::string text = captured.str_safe();
-            size_t pos = text.find(marker);
-            if (pos != std::string::npos && text.find('\n', pos) != std::string::npos) {
-                return true;
+            {
+                std::lock_guard<std::mutex> lock(reports_mutex);
+                if (reports.find(parent_id) != reports.end()) return true;
             }
             std::this_thread::yield();
         }
         return false;
     }
 
-    std::string extract_result_line(OrderID parent_id) {
-        std::string text = captured.str_safe();
-        std::string marker = "RESULT,parent_id=" + std::to_string(parent_id) + ",";
-        size_t pos = text.find(marker);
-        if (pos == std::string::npos) return "";
-        size_t end = text.find('\n', pos);
-        return text.substr(pos, end - pos);
+    ExecutionReport get_report(OrderID parent_id) {
+        std::lock_guard<std::mutex> lock(reports_mutex);
+        return reports.at(parent_id);
     }
 
-    std::string extract_report_block(OrderID parent_id) {
-        std::string text = captured.str_safe();
-        std::string start_marker = "Execution Report for Order " + std::to_string(parent_id) + "\n";
-        size_t start = text.find(start_marker);
-        if (start == std::string::npos) return "";
-        std::string end_marker = "RESULT,parent_id=" + std::to_string(parent_id) + ",";
-        size_t end = text.find(end_marker, start);
-        if (end == std::string::npos) return "";
-        size_t line_end = text.find('\n', end);
-        return text.substr(start, line_end - start);
-    }
-
-    double extract_field(const std::string& line, const std::string& key) {
-        size_t pos = line.find(key);
-        if (pos == std::string::npos) return std::numeric_limits<double>::quiet_NaN();
-        pos += key.size();
-        size_t end = line.find_first_of(",\n", pos);
-        return std::stod(line.substr(pos, end - pos));
+    bool has_report(OrderID parent_id) {
+        std::lock_guard<std::mutex> lock(reports_mutex);
+        return reports.find(parent_id) != reports.end();
     }
 };
 
@@ -148,12 +105,12 @@ TEST_F(AnalyticsEngineTest, Completion_NoFills_ReportsZeroFillRateAndFallsBackTo
     push_completion(1, true, 1.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "fill_rate="), 0.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "avg_fill_price="), 0.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "window_vwap="), 100.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "timed_out="), 1.0);
+    EXPECT_DOUBLE_EQ(report.fill_rate, 0.0);
+    EXPECT_DOUBLE_EQ(report.avg_fill_price, 0.0);
+    EXPECT_DOUBLE_EQ(report.window_vwap, 100.0);
+    EXPECT_TRUE(report.timed_out);
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FullFill_BuySide_ComputesPositiveShortfallWhenOverpaying) {
@@ -162,12 +119,12 @@ TEST_F(AnalyticsEngineTest, Completion_FullFill_BuySide_ComputesPositiveShortfal
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "fill_rate="), 1.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "avg_fill_price="), 101.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "implementation_shortfall="), 100.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "timed_out="), 0.0);
+    EXPECT_DOUBLE_EQ(report.fill_rate, 1.0);
+    EXPECT_DOUBLE_EQ(report.avg_fill_price, 101.0);
+    EXPECT_DOUBLE_EQ(report.implementation_shortfall, 100.0);
+    EXPECT_FALSE(report.timed_out);
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FullFill_SellSide_ShortfallSignMatchesBuyForABadFill) {
@@ -176,10 +133,10 @@ TEST_F(AnalyticsEngineTest, Completion_FullFill_SellSide_ShortfallSignMatchesBuy
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "avg_fill_price="), 99.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "implementation_shortfall="), 100.0);
+    EXPECT_DOUBLE_EQ(report.avg_fill_price, 99.0);
+    EXPECT_DOUBLE_EQ(report.implementation_shortfall, 100.0);
 }
 
 TEST_F(AnalyticsEngineTest, Completion_PartialFill_ComputesFractionalFillRate) {
@@ -188,9 +145,9 @@ TEST_F(AnalyticsEngineTest, Completion_PartialFill_ComputesFractionalFillRate) {
     push_completion(1, true, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "fill_rate="), 0.4);
+    EXPECT_DOUBLE_EQ(report.fill_rate, 0.4);
 }
 
 TEST_F(AnalyticsEngineTest, Completion_ZeroIntendedQuantity_FillRateIsZeroWithoutDivByZero) {
@@ -198,9 +155,9 @@ TEST_F(AnalyticsEngineTest, Completion_ZeroIntendedQuantity_FillRateIsZeroWithou
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "fill_rate="), 0.0);
+    EXPECT_DOUBLE_EQ(report.fill_rate, 0.0);
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FillsAcrossTwoVenues_AggregatesWeightedAvgPriceAndPerVenueBreakdown) {
@@ -210,12 +167,17 @@ TEST_F(AnalyticsEngineTest, Completion_FillsAcrossTwoVenues_AggregatesWeightedAv
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string result_line = extract_result_line(1);
-    std::string report_block = extract_report_block(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(result_line, "avg_fill_price="), 100.8);
-    EXPECT_NE(report_block.find("Venue 1: qty=60 fills=1"), std::string::npos);
-    EXPECT_NE(report_block.find("Venue 2: qty=40 fills=1"), std::string::npos);
+    EXPECT_DOUBLE_EQ(report.avg_fill_price, 100.8);
+
+    ASSERT_EQ(report.venue_breakdown.count(1), 1u);
+    EXPECT_EQ(report.venue_breakdown.at(1).filled_qty, 60);
+    EXPECT_EQ(report.venue_breakdown.at(1).fill_count, 1);
+
+    ASSERT_EQ(report.venue_breakdown.count(2), 1u);
+    EXPECT_EQ(report.venue_breakdown.at(2).filled_qty, 40);
+    EXPECT_EQ(report.venue_breakdown.at(2).fill_count, 1);
 }
 
 TEST_F(AnalyticsEngineTest, UnknownParentId_FillEvent_IsSilentlyIgnored) {
@@ -226,10 +188,10 @@ TEST_F(AnalyticsEngineTest, UnknownParentId_FillEvent_IsSilentlyIgnored) {
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "fill_rate="), 1.0);
-    EXPECT_DOUBLE_EQ(extract_field(line, "avg_fill_price="), 100.0);
+    EXPECT_DOUBLE_EQ(report.fill_rate, 1.0);
+    EXPECT_DOUBLE_EQ(report.avg_fill_price, 100.0);
 }
 
 TEST_F(AnalyticsEngineTest, UnknownParentId_CompletionEvent_ProducesNoReportAndDoesNotBlockLaterOrders) {
@@ -240,7 +202,7 @@ TEST_F(AnalyticsEngineTest, UnknownParentId_CompletionEvent_ProducesNoReportAndD
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    EXPECT_EQ(captured.str_safe().find("RESULT,parent_id=999,"), std::string::npos);
+    EXPECT_FALSE(has_report(999));
 }
 
 TEST_F(AnalyticsEngineTest, Trade_ArrivingBeforeAnyDecision_IsDroppedAndExcludedFromWindowVwap) {
@@ -268,9 +230,9 @@ TEST_F(AnalyticsEngineTest, Trade_ArrivingBeforeAnyDecision_IsDroppedAndExcluded
     push_completion(1, false, 2.0);
 
     ASSERT_TRUE(wait_for_report(1));
-    std::string line = extract_result_line(1);
+    ExecutionReport report = get_report(1);
 
-    EXPECT_DOUBLE_EQ(extract_field(line, "window_vwap="), 105.0);
+    EXPECT_DOUBLE_EQ(report.window_vwap, 105.0);
 }
 
 TEST_F(AnalyticsEngineTest, Start_CalledTwice_DoesNotSpawnSecondWorkerOrCrash) {
