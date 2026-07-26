@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <span>
 
 #include "common/Types.h"
 #include "lob/Venue.h"
@@ -7,13 +8,13 @@
 class DPEngine{
     RouterConfig config;
 
-    double calculate_lit_cost(const VenueState& venue, Side side, int64_t quantity, int64_t worst_price) const;
+    double calculate_lit_cost(const VenueState& venue, int64_t quantity, int64_t visible_liquidity) const;
 
-    double calculate_dark_cost(const VenueState& venue, int64_t quantity, const std::vector<double>& lit_dp_table) const;
+    double calculate_dark_cost(const VenueState& venue, int64_t quantity, std::span<const double> lit_dp_table) const;
 
     double estimate_dark_fill_ratio(const VenueState& venue, int64_t quantity) const;
 
-    double calculate_miss_penalty(int64_t unfilled_quantity, const std::vector<double>& lit_dp_table) const;
+    double calculate_miss_penalty(int64_t unfilled_quantity, std::span<const double> lit_dp_table) const;
 
     public:
         DPEngine(const RouterConfig& cfg);

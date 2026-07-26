@@ -3,10 +3,8 @@
 DPEngine::DPEngine(const RouterConfig& cfg):
     config(cfg) {}
 
-double DPEngine::calculate_lit_cost(const VenueState& venue, Side side, int64_t quantity, int64_t worst_price) const {;
+double DPEngine::calculate_lit_cost(const VenueState& venue, int64_t quantity, int64_t visible_liquidity) const {
     if (quantity == 0) return 0.0;
-
-    int64_t visible_liquidity = venue.get_visible_liquidity(side, worst_price);
 
     if (visible_liquidity == 0) {return std::numeric_limits<double>::max();}
 
@@ -18,7 +16,7 @@ double DPEngine::calculate_lit_cost(const VenueState& venue, Side side, int64_t 
     return spread_cost + impact_cost + fee_cost + latency_cost;
 }
 
-double DPEngine::calculate_dark_cost(const VenueState& venue, int64_t quantity, const std::vector<double>& lit_dp_table) const {
+double DPEngine::calculate_dark_cost(const VenueState& venue, int64_t quantity, std::span<const double> lit_dp_table) const {
     if (quantity == 0) return 0.0;
 
     double p_fill = estimate_dark_fill_ratio(venue, quantity);
@@ -39,7 +37,7 @@ double DPEngine::estimate_dark_fill_ratio(const VenueState& venue, int64_t quant
     return base_ratio * std::exp(exponent);
 }
 
-double DPEngine::calculate_miss_penalty(int64_t unfilled_quantity, const std::vector<double>& lit_dp_table) const {
+double DPEngine::calculate_miss_penalty(int64_t unfilled_quantity, std::span<const double> lit_dp_table) const {
     if (unfilled_quantity <= 0) return 0.0;
 
     int64_t index = unfilled_quantity / config.lot_size;
@@ -52,6 +50,8 @@ double DPEngine::calculate_miss_penalty(int64_t unfilled_quantity, const std::ve
 
 SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues) {
     int64_t num_lots = total_size / config.lot_size;
+    int64_t W = num_lots + 1;
+    int64_t V = static_cast<int64_t>(venues.size());
 
     std::vector<std::pair<const VenueState*, int>> lit_venues;
     std::vector<std::pair<const VenueState*, int>> dark_venues;
@@ -61,68 +61,91 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
     }
 
     const double INF = std::numeric_limits<double>::max();
-    std::vector<std::vector<double>> dp_table(venues.size() + 1, std::vector<double>(num_lots + 1, INF));
-    std::vector<std::vector<int64_t>> choice_table(venues.size() + 1, std::vector<int64_t>(num_lots + 1, 0));
 
-    dp_table[0][0] = 0.0;
+    std::vector<double> dp_table(static_cast<size_t>(V + 1) * W, INF);
+    std::vector<int64_t> choice_table(static_cast<size_t>(V + 1) * W, 0);
 
-    for (int k = 1; k <= lit_venues.size(); ++k) {
+    dp_table[0] = 0.0;
+
+    std::vector<double> prev_reversed(W);
+    std::vector<double> cost_for_x(W);
+
+    for (int k = 1; k <= (int)lit_venues.size(); ++k) {
         const VenueState* venue = lit_venues[k-1].first;
+        int64_t visible_liquidity = venue->get_visible_liquidity(side, worst_price);
 
-        for (int n = 0; n <= num_lots; ++n) {
+        for (int64_t x = 0; x < W; ++x) {
+            cost_for_x[x] = calculate_lit_cost(*venue, x * config.lot_size, visible_liquidity);
+        }
+
+        const double* prev_row = &dp_table[static_cast<size_t>(k - 1) * W];
+        for (int64_t i = 0; i < W; ++i) prev_reversed[i] = prev_row[W - 1 - i];
+
+        double* cur_row = &dp_table[static_cast<size_t>(k) * W];
+        int64_t* cur_choice = &choice_table[static_cast<size_t>(k) * W];
+
+        for (int64_t n = 0; n < W; ++n) {
             double min_cost = INF;
             int64_t best_x = 0;
+            const double* prev_slice = &prev_reversed[W - 1 - n];
 
-            for (int x = 0; x <= n; ++x) {
-                double cost_k = calculate_lit_cost(*venue, side, x * config.lot_size, worst_price);
-
-                if (dp_table[k - 1][n - x] != INF) {
-                    double total_cost = cost_k + dp_table[k - 1][n - x];
-
+            for (int64_t x = 0; x <= n; ++x) {
+                double prev_val = prev_slice[x];
+                if (prev_val != INF) {
+                    double total_cost = cost_for_x[x] + prev_val;
                     if (total_cost < min_cost) {
                         min_cost = total_cost;
                         best_x = x;
                     }
                 }
             }
-            dp_table[k][n] = min_cost;
-            choice_table[k][n] = best_x;
+            cur_row[n] = min_cost;
+            cur_choice[n] = best_x;
         }
     }
 
-    const std::vector<double>& lit_dp_table = dp_table[lit_venues.size()];
+    std::span<const double> lit_dp_table(&dp_table[static_cast<size_t>(lit_venues.size()) * W], W);
 
-    for (int k = lit_venues.size() + 1; k <= venues.size(); ++k) {
+    for (int k = (int)lit_venues.size() + 1; k <= V; ++k) {
         const VenueState* venue = dark_venues[k - lit_venues.size() - 1].first;
 
-        for (int n = 0; n <= num_lots; ++n) {
+        for (int64_t x = 0; x < W; ++x) {
+            cost_for_x[x] = calculate_dark_cost(*venue, x * config.lot_size, lit_dp_table);
+        }
+
+        const double* prev_row = &dp_table[static_cast<size_t>(k - 1) * W];
+        for (int64_t i = 0; i < W; ++i) prev_reversed[i] = prev_row[W - 1 - i];
+
+        double* cur_row = &dp_table[static_cast<size_t>(k) * W];
+        int64_t* cur_choice = &choice_table[static_cast<size_t>(k) * W];
+
+        for (int64_t n = 0; n < W; ++n) {
             double min_cost = INF;
             int64_t best_x = 0;
+            const double* prev_slice = &prev_reversed[W - 1 - n];
 
-            for (int x = 0; x <= n; ++x) {
-                double expected_dark_cost = calculate_dark_cost(*venue, x * config.lot_size, lit_dp_table);
-
-                if (dp_table[k - 1][n - x] != INF) {
-                    double total_cost = expected_dark_cost + dp_table[k - 1][n - x];
-
+            for (int64_t x = 0; x <= n; ++x) {
+                double prev_val = prev_slice[x];
+                if (prev_val != INF) {
+                    double total_cost = cost_for_x[x] + prev_val;
                     if (total_cost < min_cost) {
                         min_cost = total_cost;
                         best_x = x;
                     }
                 }
             }
-            dp_table[k][n] = min_cost;
-            choice_table[k][n] = best_x;
+            cur_row[n] = min_cost;
+            cur_choice[n] = best_x;
         }
     }
 
     SplitResult result;
-    result.expected_cost = dp_table[venues.size()][num_lots];
+    result.expected_cost = dp_table[static_cast<size_t>(V) * W + num_lots];
     result.allocations.assign(venues.size(), 0);
     int64_t remaining_lots = num_lots;
 
-    for (int k = venues.size(); k >= 1; --k) {
-        int64_t lots_to_send = choice_table[k][remaining_lots];
+    for (int k = V; k >= 1; --k) {
+        int64_t lots_to_send = choice_table[static_cast<size_t>(k) * W + remaining_lots];
 
         int index = (k <= lit_venues.size())
                         ? lit_venues[k - 1].second
@@ -139,7 +162,8 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
         bool found_viable_venue = false;
 
         for (const auto& [venue, index] : lit_venues) {
-            double cost = calculate_lit_cost(*venue, side, remainder, worst_price);
+            int64_t visible_liquidity = venue->get_visible_liquidity(side, worst_price);
+            double cost = calculate_lit_cost(*venue, remainder, visible_liquidity);
             if (cost < best_cost) {
                 best_cost = cost;
                 best_index = index;
@@ -193,7 +217,8 @@ SplitResult DPEngine::compute_naive_split(int64_t total_size, Side side, int64_t
     if (best_index == -1) return result;
 
     result.allocations[best_index] = total_size;
-    result.expected_cost = calculate_lit_cost(venues[best_index], side, total_size, worst_price);
+    int64_t visible_liquidity = venues[best_index].get_visible_liquidity(side, worst_price);
+    result.expected_cost = calculate_lit_cost(venues[best_index], total_size, visible_liquidity);
 
     return result;
 }
