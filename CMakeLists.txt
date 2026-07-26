@@ -8,6 +8,7 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(REMOVE_ITEM CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/bench/bench_lob.cpp
+    ${CMAKE_SOURCE_DIR}/src/calibrate/main.cpp
 )
 
 add_library(hft_core STATIC ${CORE_SOURCES})
@@ -20,6 +21,10 @@ target_link_libraries(high_frequency PRIVATE hft_core)
 # Standalone single-threaded LimitOrderBook microbenchmark
 add_executable(bench_lob src/bench/bench_lob.cpp)
 target_link_libraries(bench_lob PRIVATE hft_core)
+
+# Randomized parameter-sweep calibration tool
+add_executable(calibrate src/calibrate/main.cpp)
+target_link_libraries(calibrate PRIVATE hft_core)
 
 option(BUILD_TESTS "Build unit tests" ON)
 if(BUILD_TESTS)
