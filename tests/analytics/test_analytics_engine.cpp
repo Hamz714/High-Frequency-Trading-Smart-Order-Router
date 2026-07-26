@@ -27,14 +27,14 @@ protected:
         engine.stop();
     }
 
-    void push_trade(VenueID venue, Side side, int64_t price, int64_t qty, double ts) {
+    void push_trade(VenueID venue, Side side, int64_t price, int64_t qty, double ts, SenderType sender = MM) {
         engine.get_trade_inbox()->push(TradeEvent{
             .venue_id = venue,
             .side = side,
             .price = price,
             .quantity = qty,
             .timestamp = ts,
-            .sender_type = MM
+            .sender_type = sender
         });
     }
 
@@ -225,6 +225,30 @@ TEST_F(AnalyticsEngineTest, Trade_ArrivingBeforeAnyDecision_IsDroppedAndExcluded
     push_fill(998, BUY, 1, 1.0, 1, 0.0);
     push_completion(998, true, 0.0);
     ASSERT_TRUE(wait_for_report(998));
+
+    push_fill(1, BUY, 100, 101.0, 1, 1.0);
+    push_completion(1, false, 2.0);
+
+    ASSERT_TRUE(wait_for_report(1));
+    ExecutionReport report = get_report(1);
+
+    EXPECT_DOUBLE_EQ(report.window_vwap, 105.0);
+}
+
+TEST_F(AnalyticsEngineTest, Trade_SORSelfTrade_ExcludedFromWindowVwap_ButMMTradeIncluded) {
+    SimClock clock;
+    clock.advance(100.0);
+    engine.set_clock(&clock);
+
+    push_decision(1, BUY, 100, 100.0, 0.0);
+
+    push_decision(997, BUY, 1, 1.0, 0.0);
+    push_fill(997, BUY, 1, 1.0, 1, 0.0);
+    push_completion(997, true, 0.0);
+    ASSERT_TRUE(wait_for_report(997));
+
+    push_trade(1, BUY, 999, 50, 1.0, SOR);
+    push_trade(1, BUY, 105, 50, 1.0, MM);
 
     push_fill(1, BUY, 100, 101.0, 1, 1.0);
     push_completion(1, false, 2.0);

@@ -144,7 +144,8 @@ void AnalyticsEngine::finalize_report(OrderID parent_id, bool timed_out) {
     double window_notional = 0.0;
     int64_t window_qty = 0;
     for (const auto& trade : trade_buffer) {
-        if (trade.timestamp >= order.decision_time && trade.timestamp <= completion_time) {
+        if (trade.timestamp >= order.decision_time && trade.timestamp <= completion_time
+            && trade.sender_type != SenderType::SOR) {
             window_notional += static_cast<double>(trade.price) * static_cast<double>(trade.quantity);
             window_qty += trade.quantity;
         }
