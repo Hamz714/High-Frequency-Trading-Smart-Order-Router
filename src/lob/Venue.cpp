@@ -6,9 +6,9 @@ Venue::Venue(int id, const VenueConfig& cfg):
             lob.on_book_update([this](Side side, int64_t price, int64_t new_qty) {
                 if (this->market_data_queue) {
                     this->market_data_queue->push({
-                        this->venue_id, 
-                        side, 
-                        price, 
+                        this->venue_id,
+                        side,
+                        price,
                         new_qty
                     });
                 }
