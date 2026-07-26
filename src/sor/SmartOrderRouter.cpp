@@ -89,6 +89,19 @@ void SmartOrderRouter::submit_order(const OrderRequest& client_request) {
     client_inbox.push(client_request);
 }
 
+uint64_t SmartOrderRouter::get_dropped_total() const {
+    uint64_t total = client_inbox.dropped();
+
+    for (const auto& [venue_id, queue] : venue_md_queues) {
+        total += queue->dropped();
+    }
+    for (const auto& [venue_id, queue] : venue_fill_queues) {
+        total += queue->dropped();
+    }
+
+    return total;
+}
+
 void SmartOrderRouter::market_data_loop() {
     BookDelta delta; 
 

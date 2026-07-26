@@ -67,4 +67,6 @@ public:
     void stop();
 
     void submit_order(const OrderRequest& client_request);
+
+    uint64_t get_dropped_total() const;
 };

@@ -45,6 +45,14 @@ void SimulationEngine::worker_loop(double dt) {
     }
 }
 
+uint64_t SimulationEngine::get_dropped_total() const {
+    uint64_t total = 0;
+    for (const auto& mm : market_makers) {
+        total += mm->get_dropped_total();
+    }
+    return total;
+}
+
 void SimulationEngine::stop() {
     if (running.exchange(false, std::memory_order_release)) {
         if (worker_thread.joinable()) {

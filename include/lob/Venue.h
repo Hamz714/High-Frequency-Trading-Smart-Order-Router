@@ -74,5 +74,7 @@ class Venue {
         VenueType get_type() const;
         const VenueConfig& get_config() const;
 
+        uint64_t get_dropped_total() const { return inbox.dropped(); }
+
     void route_order(const OrderRequest& req);
 };

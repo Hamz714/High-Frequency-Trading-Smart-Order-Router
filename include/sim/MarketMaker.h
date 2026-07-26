@@ -45,4 +45,6 @@ public:
     MarketMaker& operator=(const MarketMaker&) = delete;
     
     void update(double fair_value, double volatility);
+
+    uint64_t get_dropped_total() const { return mm_fill_queue->dropped(); }
 };

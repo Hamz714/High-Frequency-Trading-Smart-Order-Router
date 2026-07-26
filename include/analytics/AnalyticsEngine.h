@@ -43,6 +43,8 @@ public:
     MPSCQueue<TradeEvent, QUEUE_SIZE>* get_trade_inbox();
     SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* get_order_inbox();
 
+    uint64_t get_dropped_total() const { return trade_inbox.dropped() + order_inbox.dropped(); }
+
     void start();
     void stop();
 };

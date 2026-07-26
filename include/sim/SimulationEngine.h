@@ -33,4 +33,6 @@ public:
 
     void start(double dt);
     void stop();
+
+    uint64_t get_dropped_total() const;
 };
