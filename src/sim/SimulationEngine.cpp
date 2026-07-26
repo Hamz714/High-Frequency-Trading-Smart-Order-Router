@@ -1,5 +1,7 @@
 #include "sim/SimulationEngine.h"
 
+#include <cmath>
+
 SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock)
     : price_process(std::move(pp)), clock(clock) {}
 
@@ -28,10 +30,10 @@ void SimulationEngine::start(double dt) {
 void SimulationEngine::worker_loop(double dt) {
     while (running.load(std::memory_order_acquire)) {
         double current_fair_value = price_process->step();
-        double volatility = price_process->get_volatility();
+        double per_tick_volatility = price_process->get_volatility() * std::sqrt(dt);
 
         for (auto& mm : market_makers) {
-            mm->update(current_fair_value, volatility);
+            mm->update(current_fair_value, per_tick_volatility);
         }
 
         for (auto& nt : noise_traders) {
