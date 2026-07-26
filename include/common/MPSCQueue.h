@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <type_traits>
 
 template<typename T, size_t Capacity>
@@ -12,10 +13,12 @@ class MPSCQueue {
     };
 
     alignas(64) Slot buffer_[Capacity];
-    
+
     alignas(64) std::atomic<size_t> enqueue_pos_{0};
-    
-    alignas(64) size_t dequeue_pos_{0}; 
+
+    alignas(64) size_t dequeue_pos_{0};
+
+    alignas(64) std::atomic<uint64_t> dropped_{0};
 
 public:
     MPSCQueue() {
@@ -42,7 +45,8 @@ public:
                     break;
                 }
             } else if (diff < 0) {
-                return false; 
+                dropped_.fetch_add(1, std::memory_order_relaxed);
+                return false;
             } else {
                 pos = enqueue_pos_.load(std::memory_order_relaxed);
             }
@@ -70,5 +74,9 @@ public:
         }
 
         return false;
+    }
+
+    uint64_t dropped() const {
+        return dropped_.load(std::memory_order_relaxed);
     }
 };
