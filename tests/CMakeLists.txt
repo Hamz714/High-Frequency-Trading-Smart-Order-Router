@@ -15,12 +15,9 @@ include(GoogleTest)
 
 file(GLOB_RECURSE UNIT_TEST_SOURCES CONFIGURE_DEPENDS *.cpp)
 
-file(GLOB_RECURSE PROJECT_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.cpp)
-list(REMOVE_ITEM PROJECT_SOURCES ${CMAKE_SOURCE_DIR}/src/main.cpp)
-
-add_executable(unit_tests ${UNIT_TEST_SOURCES} ${PROJECT_SOURCES})
+add_executable(unit_tests ${UNIT_TEST_SOURCES})
 
 target_include_directories(unit_tests PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_libraries(unit_tests PRIVATE gtest_main)
+target_link_libraries(unit_tests PRIVATE hft_core gtest_main)
 
 gtest_discover_tests(unit_tests)
