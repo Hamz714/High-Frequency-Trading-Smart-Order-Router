@@ -24,7 +24,8 @@ private:
 
     std::unordered_map<VenueID, Venue*> venues;
 
-    mutable std::shared_mutex state_mutex;
+    mutable std::shared_mutex book_mutex;
+    std::mutex order_mutex;
 
     std::unordered_map<VenueID, LimitOrderBook> mirror_books;
     std::unordered_map<OrderID, ParentOrder> active_parent_orders;

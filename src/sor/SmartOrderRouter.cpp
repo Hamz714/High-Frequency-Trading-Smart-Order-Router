@@ -116,7 +116,7 @@ void SmartOrderRouter::market_data_loop() {
                 idle = false;
                 processed_count++;
 
-                std::unique_lock<std::shared_mutex> lock(state_mutex);
+                std::unique_lock<std::shared_mutex> lock(book_mutex);
                 mirror_books[venue_id].apply_delta(delta);
             }
         }
@@ -141,7 +141,7 @@ void SmartOrderRouter::fill_loop() {
                 idle = false;
                 processed_count++;
                 
-                std::unique_lock<std::shared_mutex> lock(state_mutex);
+                std::unique_lock<std::mutex> order_lock(order_mutex);
 
                 auto parent_it = child_to_parent.find(fill.child_id);
                 if (parent_it == child_to_parent.end()) continue; 
@@ -168,11 +168,15 @@ void SmartOrderRouter::fill_loop() {
                         parent.reroute_count++;
 
                         if (parent.reroute_count <= config.max_reroute_attempts) {
-                            SplitResult new_split = compute_split(
-                                fill.remaining_quantity,
-                                parent.side,
-                                parent.price
-                            );
+                            SplitResult new_split;
+                            {
+                                std::shared_lock<std::shared_mutex> book_lock(book_mutex);
+                                new_split = compute_split(
+                                    fill.remaining_quantity,
+                                    parent.side,
+                                    parent.price
+                                );
+                            }
 
                             int64_t routed = execute_routing_decision(parent, new_split);
                             if (routed == 0) {
@@ -230,25 +234,34 @@ void SmartOrderRouter::client_order_loop() {
             int64_t routed = 0;
 
             for (int attempt = 0; attempt <= max_initial_attempts; ++attempt) {
-                std::unique_lock<std::shared_mutex> lock(state_mutex);
+                std::unique_lock<std::mutex> order_lock(order_mutex);
 
                 if (attempt == 0) {
                     parent.decision_time = clock ? clock->now() : 0.0;
                     active_parent_orders[parent.parent_id] = parent;
 
                     if (analytics_queue) {
+                        double mid;
+                        {
+                            std::shared_lock<std::shared_mutex> book_lock(book_mutex);
+                            mid = compute_consolidated_mid();
+                        }
                         analytics_queue->push({
                             OrderEventType::DECISION, parent.parent_id, parent.side,
-                            parent.total_qty, compute_consolidated_mid(), -1,
+                            parent.total_qty, mid, -1,
                             parent.decision_time, false
                         });
                     }
                 }
 
-                SplitResult split = compute_split(req.quantity, req.side, req.price);
+                SplitResult split;
+                {
+                    std::shared_lock<std::shared_mutex> book_lock(book_mutex);
+                    split = compute_split(req.quantity, req.side, req.price);
+                }
                 routed = execute_routing_decision(active_parent_orders[parent.parent_id], split);
 
-                lock.unlock();
+                order_lock.unlock();
 
                 if (routed > 0 || attempt == max_initial_attempts) break;
 
@@ -256,7 +269,7 @@ void SmartOrderRouter::client_order_loop() {
             }
 
             if (routed == 0) {
-                std::unique_lock<std::shared_mutex> lock(state_mutex);
+                std::unique_lock<std::mutex> order_lock(order_mutex);
                 if (analytics_queue) {
                     analytics_queue->push({
                         OrderEventType::COMPLETION, parent.parent_id, parent.side,
@@ -267,7 +280,7 @@ void SmartOrderRouter::client_order_loop() {
             }
 
         } else {
-            std::this_thread::yield(); 
+            _mm_pause();
         }
     }
 }
