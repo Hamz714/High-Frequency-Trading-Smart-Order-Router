@@ -1,5 +1,5 @@
 build/
 .vscode/
 .claude/
-results/
+results/*
 !results/baseline/
