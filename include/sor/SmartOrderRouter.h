@@ -7,8 +7,8 @@
 #include <thread>
 #include <vector>
 #include <memory>
-#include <immintrin.h>
 
+#include "common/CpuRelax.h"
 #include "common/Types.h"
 #include "common/SPSCQueue.h"
 #include "common/MPSCQueue.h"

@@ -56,7 +56,7 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
     std::vector<std::pair<const VenueState*, int>> lit_venues;
     std::vector<std::pair<const VenueState*, int>> dark_venues;
 
-    for (int i = 0; i < venues.size(); ++i) {
+    for (size_t i = 0; i < venues.size(); ++i) {
         if (venues[i].config.type == LIT) {lit_venues.push_back({&venues[i], i});} else {dark_venues.push_back({&venues[i], i});}
     }
 
@@ -147,7 +147,7 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
     for (int k = V; k >= 1; --k) {
         int64_t lots_to_send = choice_table[static_cast<size_t>(k) * W + remaining_lots];
 
-        int index = (k <= lit_venues.size())
+        int index = (k <= static_cast<int>(lit_venues.size()))
                         ? lit_venues[k - 1].second
                         : dark_venues[k - lit_venues.size() - 1].second;
 
@@ -196,7 +196,7 @@ SplitResult DPEngine::compute_naive_split(int64_t total_size, Side side, int64_t
     int best_index = -1;
     int64_t best_price = (side == BUY) ? std::numeric_limits<int64_t>::max() : 0;
 
-    for (int i = 0; i < venues.size(); ++i) {
+    for (size_t i = 0; i < venues.size(); ++i) {
         if (venues[i].config.type != LIT) continue;
 
         if (side == BUY) {

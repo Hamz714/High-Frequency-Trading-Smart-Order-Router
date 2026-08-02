@@ -72,7 +72,7 @@ void Venue::worker_loop() {
     while (running.load(std::memory_order_acquire)) {
         while (!inbox.try_pop(req)) {
             if (!running.load(std::memory_order_acquire)) return;
-            _mm_pause(); 
+            cpu_relax();
         }
 
         if (req.request_type == RequestType::CANCEL) {

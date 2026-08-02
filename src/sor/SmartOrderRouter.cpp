@@ -122,7 +122,7 @@ void SmartOrderRouter::market_data_loop() {
         }
 
         if (idle) {
-            _mm_pause();
+            cpu_relax();
         }
     }
 }
@@ -210,7 +210,7 @@ void SmartOrderRouter::fill_loop() {
         }
 
         if (idle) {
-            _mm_pause();
+            cpu_relax();
         }
     }
 }
@@ -280,7 +280,7 @@ void SmartOrderRouter::client_order_loop() {
             }
 
         } else {
-            _mm_pause();
+            cpu_relax();
         }
     }
 }

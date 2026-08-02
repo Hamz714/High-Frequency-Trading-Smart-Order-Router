@@ -1,6 +1,6 @@
 #include "analytics/AnalyticsEngine.h"
 
-#include <immintrin.h>
+#include "common/CpuRelax.h"
 
 AnalyticsEngine::AnalyticsEngine() {}
 
@@ -58,7 +58,7 @@ void AnalyticsEngine::worker_loop() {
         }
 
         if (idle) {
-            _mm_pause();
+            cpu_relax();
         }
     }
 }

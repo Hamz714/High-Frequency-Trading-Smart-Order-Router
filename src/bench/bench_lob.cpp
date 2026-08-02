@@ -159,18 +159,18 @@ void print_console_table(const std::vector<BenchResult>& results) {
     std::cout << "\n=== LimitOrderBook Microbenchmark (single-threaded, "
               << MEASURED_OPS << " measured ops/scenario) ===\n\n";
 
-    std::cout << std::left << std::setw(38) << "Scenario"
+    std::cout << std::left << std::setw(46) << "Scenario"
               << std::right << std::setw(12) << "ops/sec"
               << std::setw(10) << "p50(ns)"
               << std::setw(10) << "p95(ns)"
               << std::setw(10) << "p99(ns)"
               << std::setw(11) << "p999(ns)"
               << std::setw(11) << "max(ns)" << "\n";
-    std::cout << std::string(102, '-') << "\n";
+    std::cout << std::string(110, '-') << "\n";
 
     for (const auto& r : results) {
         double ops_per_sec = r.total_seconds > 0.0 ? static_cast<double>(r.ops) / r.total_seconds : 0.0;
-        std::cout << std::left << std::setw(38) << r.name
+        std::cout << std::left << std::setw(46) << r.name
                   << std::right << std::setw(12) << std::fixed << std::setprecision(0) << ops_per_sec
                   << std::setw(10) << r.p50_ns
                   << std::setw(10) << r.p95_ns

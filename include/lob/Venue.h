@@ -1,9 +1,9 @@
 #pragma once
 
 #include <thread>
-#include <immintrin.h>
 #include <atomic>
 
+#include "common/CpuRelax.h"
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
 #include "common/SPSCQueue.h"

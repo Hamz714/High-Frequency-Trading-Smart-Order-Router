@@ -184,6 +184,7 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
 
         router->submit_order({ .order_id = order_id, .sender_type = SenderType::SOR,
                                 .request_type = RequestType::ORDER, .side = spec.side,
+                                .order_type = OrderType::IOC,
                                 .price = spec.price, .quantity = spec.quantity });
     }
 
