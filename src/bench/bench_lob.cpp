@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
@@ -23,10 +25,23 @@ constexpr int64_t RESTING_QTY = 100;
 constexpr int WARMUP_OPS = 2'000;
 constexpr int MEASURED_OPS = 50'000;
 
+constexpr int DEFAULT_REPEATS = 9;
+
 struct BenchResult {
     std::string name;
     int64_t ops = 0;
     double total_seconds = 0.0;
+    double p50_ns = 0.0, p95_ns = 0.0, p99_ns = 0.0, p999_ns = 0.0, max_ns = 0.0;
+
+    double ops_per_sec() const {
+        return total_seconds > 0.0 ? static_cast<double>(ops) / total_seconds : 0.0;
+    }
+};
+
+struct AggregatedResult {
+    std::string name;
+    int runs = 0;
+    double median_ops_per_sec = 0.0, min_ops_per_sec = 0.0, max_ops_per_sec = 0.0;
     double p50_ns = 0.0, p95_ns = 0.0, p99_ns = 0.0, p999_ns = 0.0, max_ns = 0.0;
 };
 
@@ -155,23 +170,71 @@ BenchResult run_match_benchmark() {
     return summarize("match (crossing, single-level partial fill)", latencies_ns, total_seconds);
 }
 
-void print_console_table(const std::vector<BenchResult>& results) {
+double median_of(std::vector<double> values) {
+    if (values.empty()) return 0.0;
+    std::sort(values.begin(), values.end());
+    size_t mid = values.size() / 2;
+    if (values.size() % 2 != 0) return values[mid];
+    return (values[mid - 1] + values[mid]) / 2.0;
+}
+
+AggregatedResult aggregate(const std::vector<BenchResult>& runs) {
+    AggregatedResult agg;
+    if (runs.empty()) return agg;
+
+    agg.name = runs.front().name;
+    agg.runs = static_cast<int>(runs.size());
+
+    std::vector<double> throughputs;
+    std::vector<double> p50s, p95s, p99s, p999s, maxes;
+    throughputs.reserve(runs.size());
+
+    for (const auto& r : runs) {
+        throughputs.push_back(r.ops_per_sec());
+        p50s.push_back(r.p50_ns);
+        p95s.push_back(r.p95_ns);
+        p99s.push_back(r.p99_ns);
+        p999s.push_back(r.p999_ns);
+        maxes.push_back(r.max_ns);
+    }
+
+    agg.median_ops_per_sec = median_of(throughputs);
+    agg.min_ops_per_sec = *std::min_element(throughputs.begin(), throughputs.end());
+    agg.max_ops_per_sec = *std::max_element(throughputs.begin(), throughputs.end());
+    agg.p50_ns = median_of(p50s);
+    agg.p95_ns = median_of(p95s);
+    agg.p99_ns = median_of(p99s);
+    agg.p999_ns = median_of(p999s);
+    agg.max_ns = *std::max_element(maxes.begin(), maxes.end());
+
+    return agg;
+}
+
+void print_console_table(const std::vector<AggregatedResult>& results, int repeats) {
     std::cout << "\n=== LimitOrderBook Microbenchmark (single-threaded, "
-              << MEASURED_OPS << " measured ops/scenario) ===\n\n";
+              << MEASURED_OPS << " measured ops/scenario x " << repeats << " runs) ===\n\n";
+    std::cout << "Throughput is the median across runs, with the observed range in brackets.\n"
+              << "Percentiles are medians across runs; on a ~100ns clock they are quantised\n"
+              << "and should be read as bounds, not exact latencies.\n\n";
 
     std::cout << std::left << std::setw(46) << "Scenario"
-              << std::right << std::setw(12) << "ops/sec"
+              << std::right << std::setw(14) << "ops/sec"
+              << std::setw(26) << "range"
               << std::setw(10) << "p50(ns)"
               << std::setw(10) << "p95(ns)"
               << std::setw(10) << "p99(ns)"
               << std::setw(11) << "p999(ns)"
               << std::setw(11) << "max(ns)" << "\n";
-    std::cout << std::string(110, '-') << "\n";
+    std::cout << std::string(138, '-') << "\n";
 
     for (const auto& r : results) {
-        double ops_per_sec = r.total_seconds > 0.0 ? static_cast<double>(r.ops) / r.total_seconds : 0.0;
+        std::ostringstream range;
+        range << std::fixed << std::setprecision(2)
+              << "[" << r.min_ops_per_sec / 1e6 << "M - " << r.max_ops_per_sec / 1e6 << "M]";
+
         std::cout << std::left << std::setw(46) << r.name
-                  << std::right << std::setw(12) << std::fixed << std::setprecision(0) << ops_per_sec
+                  << std::right << std::setw(14) << std::fixed << std::setprecision(0) << r.median_ops_per_sec
+                  << std::setw(26) << range.str()
                   << std::setw(10) << r.p50_ns
                   << std::setw(10) << r.p95_ns
                   << std::setw(10) << r.p99_ns
@@ -181,28 +244,24 @@ void print_console_table(const std::vector<BenchResult>& results) {
     std::cout << "\n";
 }
 
-void print_regime_comparison(const BenchResult& shallow, const BenchResult& deep, const std::string& op) {
-    // Falls back to p95 when the ladder-region p50 rounds to 0ns at clock
-    // resolution (common for very fast ops like ladder cancels), rather than
-    // silently dropping the comparison.
-    bool use_p95 = shallow.p50_ns <= 0.0;
-    double shallow_ref = use_p95 ? shallow.p95_ns : shallow.p50_ns;
-    double deep_ref = use_p95 ? deep.p95_ns : deep.p50_ns;
-    const char* basis = use_p95 ? "p95" : "p50";
-
-    if (shallow_ref <= 0.0) {
-        std::cout << "  " << op << ": ladder-region latency too small to resolve a ratio at this clock resolution\n";
+void print_regime_comparison(const AggregatedResult& shallow, const AggregatedResult& deep, const std::string& op) {
+    if (deep.median_ops_per_sec <= 0.0) {
+        std::cout << "  " << op << ": no overflow-map throughput recorded\n";
         return;
     }
 
-    double ratio = deep_ref / shallow_ref;
-    std::cout << "  " << op << ": overflow-map " << basis << " is " << std::fixed << std::setprecision(2)
-              << ratio << "x the ladder-region " << basis << "\n";
+    double ratio = shallow.median_ops_per_sec / deep.median_ops_per_sec;
+    bool ranges_overlap = shallow.min_ops_per_sec <= deep.max_ops_per_sec;
+
+    std::cout << "  " << op << ": ladder region sustains " << std::fixed << std::setprecision(2)
+              << ratio << "x the throughput of the overflow map"
+              << (ranges_overlap ? " (ranges overlap - treat as indicative)" : " (ranges disjoint)") << "\n";
 }
 
 std::string timestamp_string() {
     auto now = std::chrono::system_clock::now();
     std::time_t t = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
     std::tm tm_buf{};
 #if defined(_WIN32)
     localtime_s(&tm_buf, &t);
@@ -210,37 +269,56 @@ std::string timestamp_string() {
     localtime_r(&t, &tm_buf);
 #endif
     std::ostringstream oss;
-    oss << std::put_time(&tm_buf, "%Y%m%d_%H%M%S");
+    oss << std::put_time(&tm_buf, "%Y%m%d_%H%M%S") << "_"
+        << std::setfill('0') << std::setw(3) << ms.count();
     return oss.str();
 }
 
-void export_csv(const std::vector<BenchResult>& results, const std::string& path) {
+void export_csv(const std::vector<AggregatedResult>& results, const std::string& path) {
     std::ofstream out(path);
-    out << "scenario,ops,total_seconds,ops_per_sec,p50_ns,p95_ns,p99_ns,p999_ns,max_ns\n";
+    out << "scenario,runs,median_ops_per_sec,min_ops_per_sec,max_ops_per_sec,"
+           "p50_ns,p95_ns,p99_ns,p999_ns,max_ns\n";
     for (const auto& r : results) {
-        double ops_per_sec = r.total_seconds > 0.0 ? static_cast<double>(r.ops) / r.total_seconds : 0.0;
-        out << r.name << "," << r.ops << "," << r.total_seconds << "," << ops_per_sec << ","
+        out << '"' << r.name << '"' << "," << r.runs << "," << r.median_ops_per_sec << ","
+            << r.min_ops_per_sec << "," << r.max_ops_per_sec << ","
             << r.p50_ns << "," << r.p95_ns << "," << r.p99_ns << "," << r.p999_ns << "," << r.max_ns << "\n";
     }
 }
 
 }  // namespace
 
-int main() {
-    std::cout << "[ BENCH_LOB ] running LimitOrderBook microbenchmark...\n";
+int main(int argc, char** argv) {
+    int repeats = DEFAULT_REPEATS;
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
+            repeats = std::max(1, std::atoi(argv[++i]));
+        }
+    }
 
-    BenchResult insert_shallow = run_insert_benchmark("insert (ladder region)", /*shallow=*/true);
-    BenchResult insert_deep = run_insert_benchmark("insert (overflow map region)", /*shallow=*/false);
-    BenchResult cancel_shallow = run_cancel_benchmark("cancel (ladder region)", /*shallow=*/true);
-    BenchResult cancel_deep = run_cancel_benchmark("cancel (overflow map region)", /*shallow=*/false);
-    BenchResult match = run_match_benchmark();
+    std::cout << "[ BENCH_LOB ] running LimitOrderBook microbenchmark (" << repeats << " runs)...\n";
 
-    std::vector<BenchResult> results{ insert_shallow, insert_deep, cancel_shallow, cancel_deep, match };
-    print_console_table(results);
+    std::vector<BenchResult> insert_shallow, insert_deep, cancel_shallow, cancel_deep, match;
+
+    for (int run = 0; run < repeats; ++run) {
+        insert_shallow.push_back(run_insert_benchmark("insert (ladder region)", /*shallow=*/true));
+        insert_deep.push_back(run_insert_benchmark("insert (overflow map region)", /*shallow=*/false));
+        cancel_shallow.push_back(run_cancel_benchmark("cancel (ladder region)", /*shallow=*/true));
+        cancel_deep.push_back(run_cancel_benchmark("cancel (overflow map region)", /*shallow=*/false));
+        match.push_back(run_match_benchmark());
+    }
+
+    AggregatedResult agg_insert_shallow = aggregate(insert_shallow);
+    AggregatedResult agg_insert_deep = aggregate(insert_deep);
+    AggregatedResult agg_cancel_shallow = aggregate(cancel_shallow);
+    AggregatedResult agg_cancel_deep = aggregate(cancel_deep);
+
+    std::vector<AggregatedResult> results{ agg_insert_shallow, agg_insert_deep,
+                                            agg_cancel_shallow, agg_cancel_deep, aggregate(match) };
+    print_console_table(results, repeats);
 
     std::cout << "Ladder vs. overflow-map design validation:\n";
-    print_regime_comparison(insert_shallow, insert_deep, "insert");
-    print_regime_comparison(cancel_shallow, cancel_deep, "cancel");
+    print_regime_comparison(agg_insert_shallow, agg_insert_deep, "insert");
+    print_regime_comparison(agg_cancel_shallow, agg_cancel_deep, "cancel");
     std::cout << "\n";
 
     std::filesystem::create_directories("results");
