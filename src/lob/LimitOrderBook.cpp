@@ -1,5 +1,7 @@
 #include "lob/LimitOrderBook.h"
 
+#include <bit>
+
 PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
     if (side == SELL) {
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
@@ -72,7 +74,7 @@ void LimitOrderBook::find_next_best_ask() {
         uint64_t masked_word = ask_bitmask[word_index] & search_mask;
 
         if (masked_word != 0) {
-            int next_bit_index = __builtin_ctzll(masked_word);
+            int next_bit_index = std::countr_zero(masked_word);
             best_ask = ask_ladder[word_index * 64 + next_bit_index].price;
             overflow = false;
         } else {
@@ -86,7 +88,7 @@ void LimitOrderBook::find_next_best_ask() {
                     uint64_t masked_word_boundary = ask_bitmask[next_word_index] & boundary_mask;
                     
                     if (masked_word_boundary != 0) {
-                        int next_bit_index = __builtin_ctzll(masked_word_boundary);
+                        int next_bit_index = std::countr_zero(masked_word_boundary);
                         best_ask = ask_ladder[next_word_index * 64 + next_bit_index].price;
                         overflow = false;
                     }
@@ -94,7 +96,7 @@ void LimitOrderBook::find_next_best_ask() {
 
                 } else {
                     if (ask_bitmask[next_word_index] != 0) {
-                        int next_local_bit = __builtin_ctzll(ask_bitmask[next_word_index]);
+                        int next_local_bit = std::countr_zero(static_cast<uint64_t>(ask_bitmask[next_word_index]));
                         best_ask = ask_ladder[next_word_index * 64 + next_local_bit].price;
                         overflow = false;
                         break;
@@ -133,7 +135,7 @@ void LimitOrderBook::find_next_best_bid() {
         uint64_t masked_word = bid_bitmask[word_index] & search_mask;
 
         if (masked_word != 0) {
-            int next_bit_index = 63 - __builtin_clzll(masked_word);
+            int next_bit_index = 63 - std::countl_zero(masked_word);
             best_bid = bid_ladder[word_index * 64 + next_bit_index].price;
             overflow = false;
 
@@ -148,7 +150,7 @@ void LimitOrderBook::find_next_best_bid() {
                     uint64_t masked_word_boundary = bid_bitmask[next_word_index] & boundary_mask;
                     
                     if (masked_word_boundary != 0) {
-                        int next_bit_index = 63 - __builtin_clzll(masked_word_boundary);
+                        int next_bit_index = 63 - std::countl_zero(masked_word_boundary);
                         best_bid = bid_ladder[next_word_index * 64 + next_bit_index].price;
                         overflow = false;
                     }
@@ -156,7 +158,7 @@ void LimitOrderBook::find_next_best_bid() {
 
                 } else {
                     if (bid_bitmask[next_word_index] != 0) {
-                        int next_local_bit = 63 - __builtin_clzll(bid_bitmask[next_word_index]);
+                        int next_local_bit = 63 - std::countl_zero(static_cast<uint64_t>(bid_bitmask[next_word_index]));
                         best_bid = bid_ladder[next_word_index * 64 + next_local_bit].price;
                         overflow = false;
                         break;
@@ -291,7 +293,7 @@ void LimitOrderBook::evict_ask_range(int64_t low_price, int64_t high_price) {
         word = (word >> bit_index) & range_mask;
         
         while (word != 0) {
-            int active_bit = __builtin_ctzll(word); 
+            int active_bit = std::countr_zero(word); 
             int64_t found_bit_index = bit_index + active_bit;
             int64_t global_index = word_index * 64 + found_bit_index;
             
@@ -360,7 +362,7 @@ void LimitOrderBook::evict_bid_range(int64_t low_price, int64_t high_price) {
         word = (word >> bit_index) & range_mask;
         
         while (word != 0) {
-            int active_bit = __builtin_ctzll(word);
+            int active_bit = std::countr_zero(word);
             int64_t found_bit_index = bit_index + active_bit;
             int64_t global_index = word_index * 64 + found_bit_index;
             
@@ -523,7 +525,7 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                 uint64_t word = ask_bitmask[next_word_index];
 
                 while (word != 0 && book_snapshot.asks.size() < level_cap) {
-                    int active_bit = __builtin_ctzll(word);
+                    int active_bit = std::countr_zero(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
 
                     SnapshotLevel snapshot_level = SnapshotLevel{ask_ladder[exact_index].price, ask_ladder[exact_index].quantity};
@@ -549,7 +551,7 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
                 uint64_t word = bid_bitmask[next_word_index];
 
                 while (word != 0 && book_snapshot.bids.size() < level_cap) {
-                    int active_bit = 63 - __builtin_clzll(word);
+                    int active_bit = 63 - std::countl_zero(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
 
                     SnapshotLevel snapshot_level = SnapshotLevel{bid_ladder[exact_index].price, bid_ladder[exact_index].quantity};
@@ -586,7 +588,7 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
                 uint64_t word = ask_bitmask[next_word_index];
 
                 while (word != 0) {
-                    int active_bit = __builtin_ctzll(word);
+                    int active_bit = std::countr_zero(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
                     int64_t price = ask_ladder[exact_index].price;
 
@@ -622,7 +624,7 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
                 uint64_t word = bid_bitmask[next_word_index];
 
                 while (word != 0) {
-                    int active_bit = 63 - __builtin_clzll(word);
+                    int active_bit = 63 - std::countl_zero(word);
                     int64_t exact_index = next_word_index * 64 + active_bit;
                     int64_t price = bid_ladder[exact_index].price;
 
