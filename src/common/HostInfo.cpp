@@ -74,7 +74,7 @@ std::string detect_cpu_brand() {
         char brand[49] = {};
         for (unsigned leaf = 0x80000002u; leaf <= 0x80000004u; ++leaf) {
             if (!cpuid_leaf(leaf, regs)) break;
-            std::memcpy(brand + (leaf - 0x80000002u) * 16, regs, 16);
+            std::memcpy(brand + static_cast<size_t>(leaf - 0x80000002u) * 16, regs, 16);
         }
         std::string result = trim(brand);
         if (!result.empty()) return result;

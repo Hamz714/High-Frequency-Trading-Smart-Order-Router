@@ -320,6 +320,7 @@ void print_comparison(const std::vector<RoutingStrategy>& arms, const ArmSummari
     if (arms.empty()) return;
 
     std::vector<const ArmSummary*> arm_summaries;
+    arm_summaries.reserve(arms.size());
     for (RoutingStrategy arm : arms) arm_summaries.push_back(&summaries[static_cast<size_t>(arm)]);
 
     std::cout << "\n=== " << routing_strategy_label(arms.front())
@@ -337,6 +338,7 @@ void print_comparison(const std::vector<RoutingStrategy>& arms, const ArmSummari
 
     auto column = [&arm_summaries](double (*extract)(const ArmSummary&)) {
         std::vector<double> values;
+        values.reserve(arm_summaries.size());
         for (const ArmSummary* summary : arm_summaries) values.push_back(extract(*summary));
         return values;
     };
