@@ -367,9 +367,10 @@ TEST_F(LimitOrderBookTest, HalfSpread_OddSpread_PreservesFraction) {
 
 TEST_F(LimitOrderBookTest, OnBookUpdate_FiresOnRestAndMatchAndCancel) {
     std::vector<std::tuple<Side, int64_t, int64_t>> events;
-    book.on_book_update([&](Side side, int64_t price, int64_t qty) {
+    auto recorder = [&](Side side, int64_t price, int64_t qty) {
         events.emplace_back(side, price, qty);
-    });
+    };
+    book.on_book_update(recorder);
 
     std::vector<Fill> f1 = book.submit(SELL, LIMIT, 100, 10);
     ASSERT_EQ(events.size(), 1u);

@@ -5,19 +5,21 @@ Venue::Venue(int id, const VenueConfig& cfg, bool simulate_latency, size_t order
     venue_id(id), config(cfg), simulate_latency(simulate_latency), lob(order_pool_capacity),
     inbox(inbox_capacity) {
     if (config.type == LIT) {
-            lob.on_book_update([this](Side side, int64_t price, int64_t new_qty) {
-                if (this->market_data_queue) {
-                    this->market_data_queue->push({
-                        this->venue_id,
-                        side,
-                        price,
-                        new_qty,
-                        this->stamp_publication()
-                    });
-                }
-            });
-        }
+        lob.on_book_update(book_update_publisher);
     }
+}
+
+void Venue::BookUpdatePublisher::operator()(Side side, int64_t price, int64_t new_qty) const {
+    if (venue->market_data_queue) {
+        venue->market_data_queue->push({
+            venue->venue_id,
+            side,
+            price,
+            new_qty,
+            venue->stamp_publication()
+        });
+    }
+}
 
 Venue::~Venue() {
     stop();

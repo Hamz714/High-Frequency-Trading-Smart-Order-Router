@@ -8,7 +8,9 @@
 #include <limits>
 
 #include "common/Constants.h"
+#include "common/FunctionRef.h"
 
+using BookUpdateListener = FunctionRef<void(Side, int64_t, int64_t)>;
 
 class LimitOrderBook {
     std::array<PriceLevel, LADDER_DEPTH> bid_ladder;
@@ -36,7 +38,7 @@ class LimitOrderBook {
 
     void ensure_pool_capacity(int64_t order_index);
 
-    std::function<void(Side, int64_t, int64_t)> update_callback;
+    BookUpdateListener update_callback;
 
     PriceLevel& get_best_price_level(Side side);
 
@@ -75,7 +77,7 @@ class LimitOrderBook {
 
         int64_t get_best_ask() const;
 
-        void on_book_update(std::function<void(Side, int64_t, int64_t)> callback);
+        void on_book_update(BookUpdateListener callback);
 
         int64_t get_quantity_at_price(Side side, int64_t price) const;
 

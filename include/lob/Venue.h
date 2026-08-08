@@ -55,6 +55,13 @@ class Venue {
     MPSCQueue<TradeEvent>* analytics_trade_queue = nullptr;
     const SimClock* clock = nullptr;
 
+    struct BookUpdatePublisher {
+        Venue* venue;
+        void operator()(Side side, int64_t price, int64_t new_qty) const;
+    };
+
+    BookUpdatePublisher book_update_publisher{this};
+
     void worker_loop();
     void process_request(const OrderRequest& req);
 

@@ -697,7 +697,7 @@ int64_t LimitOrderBook::get_best_ask() const {
     return best_ask;
 }
 
-void LimitOrderBook::on_book_update(std::function<void(Side, int64_t, int64_t)> callback) {
+void LimitOrderBook::on_book_update(BookUpdateListener callback) {
     update_callback = callback;
 }
 
