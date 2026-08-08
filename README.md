@@ -9,8 +9,9 @@ execution cost, then works the order through IOC child orders and reroutes
 whatever comes back unfilled.
 
 Against a naive router that simply sweeps the venue showing the best price, the
-DP router cuts implementation shortfall by **~75%** and pays **~40% less in fees**,
-while filling more of the order.
+DP router cuts implementation shortfall by **~68%** and pays **~39% less in fees**,
+while filling more of the order. Venue latency is simulated, not just priced — a
+child order is held on the wire and quotes reach the router stale.
 
 [![CI](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml/badge.svg)](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml)
 
@@ -18,24 +19,69 @@ while filling more of the order.
 
 ## Results
 
-25 Monte Carlo trials × 6 parent orders × 2 arms (300 executions). Both arms run
-against the same seeded market, so the only variable is the routing decision.
+100 Monte Carlo trials × 6 parent orders × 2 arms (1,200 executions), with venue
+latency simulated. Both arms run against the same seeded market, so the only
+variable is the routing decision.
 
 | Metric | SOR (DP) | Naive | Delta |
 |---|---:|---:|---:|
-| Implementation shortfall (bps) | **5.92** | 23.00 | **−17.08** |
-| VWAP slippage (bps) | **6.07** | 22.08 | **−16.01** |
-| Fill rate (%) | **96.92** | 92.69 | **+4.23** |
-| Total fees ($) | **268.07** | 451.67 | **−183.60** |
+| Implementation shortfall (bps) | **8.03** | 24.99 | **−16.96** |
+| VWAP slippage (bps) | **8.85** | 25.46 | **−16.61** |
+| Fill rate (%) | **96.84** | 91.21 | **+5.64** |
+| Total fees ($) | **1079.90** | 1774.56 | **−694.66** |
 
 Raw per-order data: [`results/baseline/sor_vs_naive.csv`](results/baseline/sor_vs_naive.csv).
-Reproduce with `./high_frequency`.
+Reproduce with `./high_frequency --trials 100`.
 
-The direction and magnitude hold across runs: over four runs the SOR's shortfall
-landed between 4.3 and 5.9 bps against 23.0 to 26.3 bps for naive, a 74–82%
-reduction, with fees consistently 41–44% lower. The tick-to-trade columns the
-binary also prints are *not* stable, and the program says so in its own output —
-see [Measurement honesty](#measurement-honesty).
+**On run-to-run stability.** Trial seeds are deterministic (`seed_base + trial`),
+so every run replays an identical market — but the arms still run on eight live
+OS threads, and thread scheduling is not reproducible. Across eight 25-trial runs
+(four per latency setting) the SOR's mean shortfall landed anywhere between 4.2
+and 10.6 bps against the *same* seeded markets. That spread is scheduling
+nondeterminism, not sampling
+variation, and it is why the headline table above uses 100 trials rather than 25.
+Read single-run differences smaller than a few bps as noise.
+
+### What simulating latency changed
+
+Turning the latency model on costs a measurable round trip and, on this
+simulator, changes execution quality by nothing measurable. Paired per-order
+comparison, 600 orders per arm, each order matched against itself in the
+identical seeded market:
+
+| Metric (SOR arm) | Latency on | Latency off | Paired delta | |
+|---|---:|---:|---:|---|
+| Implementation shortfall (bps) | 8.03 ±0.95 | 8.85 ±0.91 | −0.90 ±1.27 | within noise |
+| VWAP slippage (bps) | 8.85 ±0.89 | 9.08 ±0.89 | −0.36 ±1.25 | within noise |
+| Fill rate | 0.968 ±0.007 | 0.951 ±0.009 | +0.018 ±0.008 | direction unstable |
+| Tick-to-trade p50 (µs) † | 573.9 | 217.4 | **+356.5** | clean separation |
+
+Errors are standard errors over 573–600 paired orders. † is a difference of
+medians rather than a paired per-order statistic: the tick-to-trade *mean* is
+dominated by a long tail (1,602 µs against a 574 µs median), so the median is
+the only stable read on it.
+
+The only unambiguous effect is the round trip itself: median tick-to-trade rises
+by ~356 µs for the SOR and ~381 µs for naive, with no overlap between the two
+arms across five runs per setting, both landing near the 404 µs round trip to the
+venue the flow concentrates on. Shortfall, slippage, and fees do not move. The fill-rate
+row is marked unstable because it flips sign between experiments — positive at
+100 trials, negative across the four 25-trial runs — which is what a run-level
+scheduling effect looks like when a per-order paired test treats orders inside
+one run as independent.
+
+**Why latency does not cost anything here, and what that implies.** Two reasons,
+and the second is the interesting one. Parent orders are priced 1,000 ticks
+through the touch, so children stay marketable through a few hundred µs of drift.
+More fundamentally, *this simulator has no informed flow*: market makers quote off
+a random-walk fair value and noise traders arrive uninformed, so a stale quote is
+exactly as likely to be stale in the router's favour as against it. Latency
+therefore adds symmetric price risk, not adverse selection. Adverse selection
+requires a counterparty who knows something the router does not, and modelling
+that — flow whose arrival correlates with the price process's next move — is the
+prerequisite for the latency term in the cost function to earn its keep. The
+mechanism is now in place and measurably working; the toxic flow that would make
+it bite is not yet.
 
 ### Order book microbenchmark
 
@@ -109,6 +155,48 @@ lit venue currently shows the best price.
 
 ---
 
+## Latency is simulated, not just priced
+
+The cost function above charges each venue `latency_us · λ`. That term only means
+something if the simulator actually makes slow venues slow — otherwise it is a
+free parameter fitted to nothing, and the router is paying for a risk it never
+takes. So each venue's `latency_us` is enforced as a one-way link time on three
+legs:
+
+| Leg | Mechanism | Consequence |
+|---|---|---|
+| Router → venue | [`Venue::route_order`](src/lob/Venue.cpp) stamps an arrival time; the venue worker parks the order in a delay queue until it comes due | IOC children arrive against a book that has moved since the decision |
+| Venue → router, market data | `BookDelta` carries a `visible_ns`; [`market_data_loop`](src/sor/SmartOrderRouter.cpp) will not apply it to the mirror books before then | The DP sizes allocations against quotes that are one latency stale |
+| Venue → router, fills | `FillEvent` carries the same stamp, held by [`fill_loop`](src/sor/SmartOrderRouter.cpp) | The reroute cascade fires a full round trip late |
+
+Market makers and noise traders are **not** delayed. `latency_us` models the
+router's link to a venue; those agents are that venue's own local liquidity, and
+delaying them would slow the market uniformly rather than model anything. The
+delay queue is what stops an in-flight router order from head-of-line blocking
+them, and there is a test pinning that.
+
+Arrival times are wall-clock `steady_clock` nanoseconds, **not** the simulation
+clock. The sim clock advances in 1 ms steps while the three venue latencies are
+202 / 46 / 71 µs — all sub-tick, so enforcing against it would delay every venue
+by the same 0–1 ticks and reproduce exactly the problem this is meant to fix.
+Real threads spinning against a real clock preserve the 202 vs 46 vs 71 ordering
+that the DP's latency term ranks on.
+
+That the delay is real and not merely declared is visible in the tick-to-trade
+column, which is measured end to end and knows nothing about the latency model.
+Over five runs per setting, switching simulation on moves SOR p50 from 217–291 µs to
+574–644 µs, and naive p50 from 55–112 µs to 436–465 µs — two distributions with
+no overlap, both shifting by close to the 404 µs round trip to the venue the flow
+concentrates on.
+
+`--no-latency` disables the simulation while leaving the DP's cost function
+untouched. That is the A/B measured in
+[What simulating latency changed](#what-simulating-latency-changed), whose short
+answer is: a real round trip, and no measurable change in execution quality,
+because an uninformed simulator makes staleness symmetric.
+
+---
+
 ## Architecture
 
 Every component runs on its own thread and communicates through bounded
@@ -139,20 +227,23 @@ flowchart LR
 
     MM -->|MPSC| venues
     NT -->|MPSC| venues
-    venues -->|SPSC BookDelta| MD
-    venues -->|SPSC FillEvent| FL
-    OL -->|IOC children| venues
+    venues -->|"SPSC BookDelta<br/>+ latency"| MD
+    venues -->|"SPSC FillEvent<br/>+ latency"| FL
+    OL -->|"IOC children<br/>+ latency"| venues
     FL -.->|remainder| OL
     venues -->|MPSC TradeEvent| AE
     router -->|SPSC lifecycle| AE
 ```
+
+The three edges marked *+ latency* are held for that venue's configured link
+time — see [Latency](#latency-is-simulated-not-just-priced).
 
 Eight threads per trial, spawned and joined fresh each run.
 
 | Component | Role |
 |---|---|
 | [`LimitOrderBook`](src/lob/LimitOrderBook.cpp) | Price-time priority book; hybrid ladder + overflow map |
-| [`Venue`](src/lob/Venue.cpp) | Owns a book, matches on its own thread, publishes deltas and fills |
+| [`Venue`](src/lob/Venue.cpp) | Owns a book, matches on its own thread, publishes deltas and fills, holds inbound router orders for its link time |
 | [`DPEngine`](src/sor/DPEngine.cpp) | The allocation dynamic program and the naive baseline |
 | [`SmartOrderRouter`](src/sor/SmartOrderRouter.cpp) | Mirror books, parent/child lifecycle, reroute cascade |
 | [`AnalyticsEngine`](src/analytics/AnalyticsEngine.cpp) | Execution quality metrics, off the hot path |
@@ -192,10 +283,12 @@ The build defaults to `Release` when no build type is given — latency numbers
 from an unoptimised binary are meaningless, so this is deliberate.
 
 ```bash
-./build/high_frequency        # SOR vs naive Monte Carlo comparison
-./build/high_frequency -v     # ...with a per-order report breakdown
-./build/bench_lob             # order book microbenchmark
-./build/calibrate             # randomised parameter sweep
+./build/high_frequency               # SOR vs naive Monte Carlo comparison
+./build/high_frequency -v            # ...with a per-order report breakdown
+./build/high_frequency --no-latency  # ...with venue latency simulation disabled
+./build/high_frequency --trials 100  # ...over more trials, to shrink run-to-run noise
+./build/bench_lob                    # order book microbenchmark
+./build/calibrate                    # randomised parameter sweep
 ```
 
 Each writes a timestamped CSV into `results/`. The committed baselines in
@@ -203,8 +296,8 @@ Each writes a timestamped CSV into `results/`. The committed baselines in
 
 ### Tests
 
-135 GoogleTest cases across the book, queues, router, DP engine, simulation
-agents, and analytics.
+140 GoogleTest cases across the book, queues, router, DP engine, simulation
+agents, analytics, and the venue latency model.
 
 ```bash
 ctest --test-dir build --output-on-failure
@@ -222,6 +315,12 @@ maker behaviour, and router tuning, scoring each configuration by the resulting
 execution quality. The current [`SimConfig`](src/config/SimConfig.cpp) defaults
 are the output of that search, which is why they are unrounded.
 
+Those defaults were fitted **before** latency was simulated, against a world
+where every order arrived instantly. `router.latency_cost_factor = 3` in
+particular was tuned against a penalty that cost the router nothing, so it is
+now fit to the wrong environment. Re-running the sweep under simulated latency
+is the obvious next step and would likely move it.
+
 ---
 
 ## Measurement honesty
@@ -232,9 +331,19 @@ A few things this project deliberately does not claim:
   measures wall-clock submit→completion across eight threads that are spawned
   and joined per trial, on a loaded desktop OS. The SOR's multi-venue split and
   reroute cascade needs more cross-thread round trips than naive's single
-  dispatch, so it looks *slower* on that metric by construction. The program
-  prints this caveat itself rather than burying it. `bench_lob` is the clean,
-  threading-free latency measurement.
+  dispatch, so it looks *slower* on that metric by construction. Since venue
+  latency became a simulated delay it is also dominated by *modelled* wire time
+  — most of the reported figure is the simulator deliberately waiting, not code
+  executing, which is why the numbers jumped roughly 400 µs when the latency
+  model landed. The program prints this caveat itself rather than burying it.
+  `bench_lob` is the clean, threading-free latency measurement.
+- **The latency model is a link-time model, not a network model.** One symmetric
+  one-way delay per venue covers order entry, market data, and fill acks alike.
+  There is no jitter, no queueing delay at the venue gateway, no separate
+  multicast path, and no asymmetry between the order and data legs — all of
+  which are real effects at this timescale. Local agents are not delayed at all.
+  It is enough to make stale quotes and adverse selection real; it is not a
+  model of an exchange's network.
 - **Book percentiles are clock-limited**, as described above.
 - **The simulator is not a market.** Prices follow geometric Brownian motion,
   market makers quote off a fair value with a volatility-sensitive spread, and

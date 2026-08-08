@@ -2,6 +2,7 @@
 
 #include <thread>
 #include <atomic>
+#include <deque>
 
 #include "common/CpuRelax.h"
 #include "common/Types.h"
@@ -9,6 +10,7 @@
 #include "common/SPSCQueue.h"
 #include "common/MPSCQueue.h"
 #include "common/SimClock.h"
+#include "common/WireClock.h"
 
 struct VenueState {
     VenueID venue_id;
@@ -39,6 +41,7 @@ struct VenueState {
 class Venue {
     VenueID venue_id;
     VenueConfig config;
+    bool simulate_latency;
     LimitOrderBook lob;
 
     MPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
@@ -53,9 +56,13 @@ class Venue {
     const SimClock* clock = nullptr;
 
     void worker_loop();
+    void process_request(const OrderRequest& req);
+
+    int64_t stamp_arrival(SenderType sender) const;
+    int64_t stamp_publication() const;
 
     public:
-        Venue(int id, const VenueConfig& cfg);
+        Venue(int id, const VenueConfig& cfg, bool simulate_latency = true);
         ~Venue();
 
         void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,

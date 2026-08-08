@@ -29,6 +29,7 @@ SimConfig default_sim_config() {
     config.market.price_drift = -0.0040022139;
     config.market.price_volatility = 0.0179987903;
     config.market.price_dt = 0.001;
+    config.market.simulate_latency = true;
 
     config.router.lot_size = 27;
     config.router.latency_cost_factor = 3;

@@ -60,6 +60,7 @@ struct FillEvent {
     int64_t fill_price;
     int64_t remaining_quantity;
     OrderStatus status;
+    int64_t visible_ns = 0;
 };
 
 enum VenueType {LIT, DARK};
@@ -90,6 +91,7 @@ struct BookDelta {
     Side side;
     int64_t price;
     int64_t new_quantity;
+    int64_t visible_ns = 0;
 };
 
 struct OrderRequest {
@@ -100,6 +102,7 @@ struct OrderRequest {
     OrderType order_type;
     int64_t price;
     int64_t quantity;
+    int64_t arrival_ns = 0;
 };
 
 struct ParentOrder {

@@ -103,21 +103,38 @@ uint64_t SmartOrderRouter::get_dropped_total() const {
 }
 
 void SmartOrderRouter::market_data_loop() {
-    BookDelta delta; 
+    BookDelta delta;
+
+    std::unordered_map<VenueID, std::deque<BookDelta>> in_flight;
+    for (const auto& [venue_id, queue] : venue_md_queues) {
+        in_flight[venue_id];
+    }
 
     while (running.load(std::memory_order_relaxed)) {
         bool idle = true;
 
         for (auto& [venue_id, queue] : venue_md_queues) {
-            
+            std::deque<BookDelta>& pending = in_flight[venue_id];
+
             int processed_count = 0;
 
             while (processed_count < BATCH_LIMIT && queue->try_pop(delta)) {
-                idle = false;
                 processed_count++;
+                pending.push_back(delta);
+            }
+
+            if (pending.empty()) continue;
+
+            int64_t now = wire_now_ns();
+            int applied_count = 0;
+
+            while (applied_count < BATCH_LIMIT && !pending.empty() && pending.front().visible_ns <= now) {
+                idle = false;
+                applied_count++;
 
                 std::unique_lock<std::shared_mutex> lock(book_mutex);
-                mirror_books[venue_id].apply_delta(delta);
+                mirror_books[venue_id].apply_delta(pending.front());
+                pending.pop_front();
             }
         }
 
@@ -129,89 +146,110 @@ void SmartOrderRouter::market_data_loop() {
 
 void SmartOrderRouter::fill_loop() {
     FillEvent fill;
-    
+
+    std::unordered_map<VenueID, std::deque<FillEvent>> in_flight;
+    for (const auto& [venue_id, queue] : venue_fill_queues) {
+        in_flight[venue_id];
+    }
+
     while (running.load(std::memory_order_relaxed)) {
         bool idle = true;
 
         for (auto& [venue_id, queue] : venue_fill_queues) {
-            
+            std::deque<FillEvent>& pending = in_flight[venue_id];
+
             int processed_count = 0;
 
             while (processed_count < BATCH_LIMIT && queue->try_pop(fill)) {
-                idle = false;
                 processed_count++;
-                
-                std::unique_lock<std::mutex> order_lock(order_mutex);
+                pending.push_back(fill);
+            }
 
-                auto parent_it = child_to_parent.find(fill.child_id);
-                if (parent_it == child_to_parent.end()) continue; 
+            if (pending.empty()) continue;
 
-                OrderID parent_id = parent_it->second;
-                ParentOrder& parent = active_parent_orders[parent_id];
+            int64_t now = wire_now_ns();
+            int delivered_count = 0;
 
-                parent.filled_qty += fill.filled_quantity;
+            while (delivered_count < BATCH_LIMIT && !pending.empty() && pending.front().visible_ns <= now) {
+                idle = false;
+                delivered_count++;
 
-                if (analytics_queue) {
-                    analytics_queue->push({
-                        OrderEventType::FILL, parent_id, parent.side,
-                        fill.filled_quantity, static_cast<double>(fill.fill_price),
-                        fill.venue_id, clock ? clock->now() : 0.0, false
-                    });
-                }
-
-                if (fill.status == FILLED || fill.status == CANCELLED) {
-
-                    bool order_finished = false;
-                    bool timed_out = false;
-
-                    if (fill.remaining_quantity > 0) {
-                        parent.reroute_count++;
-
-                        if (parent.reroute_count <= config.max_reroute_attempts) {
-                            SplitResult new_split;
-                            {
-                                std::shared_lock<std::shared_mutex> book_lock(book_mutex);
-                                new_split = compute_split(
-                                    fill.remaining_quantity,
-                                    parent.side,
-                                    parent.price
-                                );
-                            }
-
-                            int64_t routed = execute_routing_decision(parent, new_split);
-                            if (routed == 0) {
-                                order_finished = true;
-                                timed_out = true;
-                            }
-                        } else {
-                            order_finished = true;
-                            timed_out = true;
-                        }
-                    }
-
-                    if (parent.filled_qty == parent.total_qty) {
-                        order_finished = true;
-                    }
-
-                    if (order_finished) {
-                        if (analytics_queue) {
-                            analytics_queue->push({
-                                OrderEventType::COMPLETION, parent_id, parent.side,
-                                parent.filled_qty, 0.0, -1,
-                                clock ? clock->now() : 0.0, timed_out
-                            });
-                        }
-                        active_parent_orders.erase(parent_id);
-                    }
-
-                    child_to_parent.erase(parent_it);
-                }
+                process_fill(pending.front());
+                pending.pop_front();
             }
         }
 
         if (idle) {
             cpu_relax();
         }
+    }
+}
+
+void SmartOrderRouter::process_fill(const FillEvent& fill) {
+    std::unique_lock<std::mutex> order_lock(order_mutex);
+
+    auto parent_it = child_to_parent.find(fill.child_id);
+    if (parent_it == child_to_parent.end()) return;
+
+    OrderID parent_id = parent_it->second;
+    ParentOrder& parent = active_parent_orders[parent_id];
+
+    parent.filled_qty += fill.filled_quantity;
+
+    if (analytics_queue) {
+        analytics_queue->push({
+            OrderEventType::FILL, parent_id, parent.side,
+            fill.filled_quantity, static_cast<double>(fill.fill_price),
+            fill.venue_id, clock ? clock->now() : 0.0, false
+        });
+    }
+
+    if (fill.status == FILLED || fill.status == CANCELLED) {
+
+        bool order_finished = false;
+        bool timed_out = false;
+
+        if (fill.remaining_quantity > 0) {
+            parent.reroute_count++;
+
+            if (parent.reroute_count <= config.max_reroute_attempts) {
+                SplitResult new_split;
+                {
+                    std::shared_lock<std::shared_mutex> book_lock(book_mutex);
+                    new_split = compute_split(
+                        fill.remaining_quantity,
+                        parent.side,
+                        parent.price
+                    );
+                }
+
+                int64_t routed = execute_routing_decision(parent, new_split);
+                if (routed == 0) {
+                    order_finished = true;
+                    timed_out = true;
+                }
+            } else {
+                order_finished = true;
+                timed_out = true;
+            }
+        }
+
+        if (parent.filled_qty == parent.total_qty) {
+            order_finished = true;
+        }
+
+        if (order_finished) {
+            if (analytics_queue) {
+                analytics_queue->push({
+                    OrderEventType::COMPLETION, parent_id, parent.side,
+                    parent.filled_qty, 0.0, -1,
+                    clock ? clock->now() : 0.0, timed_out
+                });
+            }
+            active_parent_orders.erase(parent_id);
+        }
+
+        child_to_parent.erase(parent_it);
     }
 }
 

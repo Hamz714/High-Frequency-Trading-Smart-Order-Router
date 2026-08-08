@@ -4,6 +4,7 @@
 #include <shared_mutex>
 #include <unordered_map>
 #include <atomic>
+#include <deque>
 #include <thread>
 #include <vector>
 #include <memory>
@@ -16,6 +17,7 @@
 #include "sor/DPEngine.h"
 #include "common/Constants.h"
 #include "common/SimClock.h"
+#include "common/WireClock.h"
 
 class SmartOrderRouter {
 private:
@@ -49,6 +51,8 @@ private:
     void market_data_loop();
     void fill_loop();
     void client_order_loop();
+
+    void process_fill(const FillEvent& fill);
 
     void initialise_venue_states();
     int64_t execute_routing_decision(const ParentOrder& parent, const SplitResult& split);

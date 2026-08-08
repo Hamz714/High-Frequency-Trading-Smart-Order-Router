@@ -20,6 +20,8 @@ struct MarketScenarioConfig {
     double price_drift;
     double price_volatility;
     double price_dt;
+
+    bool simulate_latency;
 };
 
 struct RouterTuningConfig {

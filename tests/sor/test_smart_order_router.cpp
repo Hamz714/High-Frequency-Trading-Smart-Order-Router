@@ -28,11 +28,12 @@ RouterConfig make_router_config(int64_t lot_size = 10, bool use_naive = false, i
     };
 }
 
-VenueConfig make_venue_config(VenueType type = LIT, double fee = 0.0, double impact = 0.0) {
+VenueConfig make_venue_config(VenueType type = LIT, double fee = 0.0, double impact = 0.0,
+                               int64_t latency_us = 0) {
     return VenueConfig{
         .type = type,
         .fee_per_share = fee,
-        .latency_us = 0,
+        .latency_us = latency_us,
         .impact_coefficient = impact,
         .historical_fill_ratio = 0.0
     };
@@ -246,6 +247,24 @@ TEST_F(SmartOrderRouterTest, TwoIndependentOrders_TrackedSeparatelyByParentId) {
     ASSERT_TRUE(sell_outcome.completed);
     EXPECT_EQ(sell_outcome.total_filled, 25);
     EXPECT_FALSE(sell_outcome.completion.timed_out);
+}
+
+TEST_F(SmartOrderRouterTest, LatencyVenue_StillFillsThroughDelayedMarketDataAndFills) {
+    constexpr int64_t kLatencyUs = 2'000;
+    Venue* v1 = make_venue(1, make_venue_config(LIT, 0.0, 0.0, kLatencyUs));
+    start_all(make_router_config());
+
+    seed_liquidity(v1, SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(BUY, 200));
+
+    auto start = std::chrono::steady_clock::now();
+    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+
+    ASSERT_TRUE(outcome.completed);
+    EXPECT_EQ(outcome.total_filled, 100);
+    EXPECT_FALSE(outcome.completion.timed_out);
+    EXPECT_GE(std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count(), 2 * kLatencyUs);
 }
 
 TEST_F(SmartOrderRouterTest, NaiveSplit_RoutesEntirelyToOneVenue) {

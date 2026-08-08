@@ -18,11 +18,11 @@ bool wait_pop(Queue& queue, T& out, std::chrono::milliseconds timeout = std::chr
     return false;
 }
 
-VenueConfig make_config(VenueType type) {
+VenueConfig make_config(VenueType type, int64_t latency_us = 0) {
     return VenueConfig{
         .type = type,
         .fee_per_share = 0.0,
-        .latency_us = 0,
+        .latency_us = latency_us,
         .impact_coefficient = 0.0,
         .historical_fill_ratio = 0.0
     };
@@ -63,6 +63,14 @@ protected:
 
     void make_venue(VenueType type = LIT) {
         venue = std::make_unique<Venue>(1, make_config(type));
+        venue->set_sor_queues(&market_data_queue, &sor_fill_queue);
+        venue->set_mm_fill_queue(&mm_fill_queue);
+        venue->set_analytics_queue(&analytics_queue);
+        venue->start();
+    }
+
+    void make_latency_venue(int64_t latency_us, bool simulate_latency = true) {
+        venue = std::make_unique<Venue>(1, make_config(LIT, latency_us), simulate_latency);
         venue->set_sor_queues(&market_data_queue, &sor_fill_queue);
         venue->set_mm_fill_queue(&mm_fill_queue);
         venue->set_analytics_queue(&analytics_queue);
@@ -236,6 +244,63 @@ TEST_F(VenueTest, RouteOrder_UsesClockForTradeTimestamp_WhenSet) {
     TradeEvent trade;
     ASSERT_TRUE(wait_pop(analytics_queue, trade));
     EXPECT_DOUBLE_EQ(trade.timestamp, 42.5);
+}
+
+TEST_F(VenueTest, Latency_SorOrderHeldForOutboundLegThenFillStampedForInboundLeg) {
+    constexpr int64_t kLatencyUs = 20'000;
+    make_latency_venue(kLatencyUs);
+
+    int64_t routed_at = wire_now_ns();
+    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+
+    FillEvent fe;
+    ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
+    int64_t matched_at = wire_now_ns();
+
+    EXPECT_EQ(fe.child_id, 1);
+    EXPECT_GE(matched_at - routed_at, kLatencyUs * 1000);
+    EXPECT_GE(fe.visible_ns, routed_at + 2 * kLatencyUs * 1000);
+}
+
+TEST_F(VenueTest, Latency_MarketDataStampedOneLatencyIntoTheFuture) {
+    constexpr int64_t kLatencyUs = 20'000;
+    make_latency_venue(kLatencyUs);
+
+    int64_t routed_at = wire_now_ns();
+    venue->route_order(make_order(1, MM, BUY, LIMIT, 100, 10));
+
+    BookDelta delta;
+    ASSERT_TRUE(wait_pop(market_data_queue, delta));
+
+    EXPECT_EQ(delta.price, 100);
+    EXPECT_GE(delta.visible_ns, routed_at + kLatencyUs * 1000);
+}
+
+TEST_F(VenueTest, Latency_LocalParticipantsNotDelayedBehindInFlightSorOrder) {
+    make_latency_venue(100'000);
+
+    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(2, MM, SELL, LIMIT, 200, 10));
+
+    FillEvent mm_fe;
+    ASSERT_TRUE(wait_pop(mm_fill_queue, mm_fe));
+    EXPECT_EQ(mm_fe.child_id, 2);
+
+    FillEvent sor_fe;
+    EXPECT_FALSE(sor_fill_queue.try_pop(sor_fe));
+    ASSERT_TRUE(wait_pop(sor_fill_queue, sor_fe));
+    EXPECT_EQ(sor_fe.child_id, 1);
+}
+
+TEST_F(VenueTest, Latency_DisabledDeliversImmediately) {
+    make_latency_venue(5'000'000, /*simulate_latency=*/false);
+
+    FillEvent fe;
+    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+
+    ASSERT_TRUE(wait_pop(sor_fill_queue, fe, std::chrono::milliseconds(1000)));
+    EXPECT_EQ(fe.child_id, 1);
+    EXPECT_EQ(fe.visible_ns, 0);
 }
 
 TEST_F(VenueTest, RouteOrder_TradeTimestampDefaultsToZero_WithoutClock) {

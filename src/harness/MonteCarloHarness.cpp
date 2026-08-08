@@ -124,9 +124,11 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
         { 1, lit_cfg_1.fee_per_share }, { 2, lit_cfg_2.fee_per_share }, { 3, dark_cfg.fee_per_share }
     };
 
-    auto venue_1 = std::make_unique<Venue>(1, lit_cfg_1);
-    auto venue_2 = std::make_unique<Venue>(2, lit_cfg_2);
-    auto venue_dark = std::make_unique<Venue>(3, dark_cfg);
+    bool simulate_latency = config.market.simulate_latency;
+
+    auto venue_1 = std::make_unique<Venue>(1, lit_cfg_1, simulate_latency);
+    auto venue_2 = std::make_unique<Venue>(2, lit_cfg_2, simulate_latency);
+    auto venue_dark = std::make_unique<Venue>(3, dark_cfg, simulate_latency);
 
     venue_1->set_clock(&clock);
     venue_2->set_clock(&clock);
