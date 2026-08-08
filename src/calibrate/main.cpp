@@ -171,6 +171,7 @@ int main(int argc, char** argv) {
     std::vector<ParamSpec> specs = build_param_specs();
     std::mt19937 rng(seed);
     SimConfig base = default_sim_config();
+    base.harness.arms = { RoutingStrategy::DP_OPTIMAL, RoutingStrategy::NAIVE };
 
     std::filesystem::create_directories("results");
     std::string csv_path = "results/calibration_" + harness::timestamp_string() + ".csv";
@@ -198,8 +199,9 @@ int main(int argc, char** argv) {
         candidate.verbose_reports = false;
 
         harness::MonteCarloRunResult result = harness::run_monte_carlo(candidate, /*show_progress=*/false);
-        harness::ArmSummary sor = harness::summarize(result.sor_rows);
-        harness::ArmSummary naive = harness::summarize(result.naive_rows);
+        harness::ArmSummaries summaries = harness::summarize_all(result);
+        const harness::ArmSummary& sor = summaries[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
+        const harness::ArmSummary& naive = summaries[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
         harness::ValidityGate gate{ .max_allowed_drops = 0, .min_fill_rate = 0.5 };
         bool drops_ok = result.total_drops <= gate.max_allowed_drops;
@@ -269,8 +271,9 @@ int main(int argc, char** argv) {
         candidate.harness.seed_base = 500000 + static_cast<uint32_t>(k) * 10000;  // independent of the sweep draw
 
         harness::MonteCarloRunResult result = harness::run_monte_carlo(candidate, /*show_progress=*/false);
-        harness::ArmSummary sor = harness::summarize(result.sor_rows);
-        harness::ArmSummary naive = harness::summarize(result.naive_rows);
+        harness::ArmSummaries summaries = harness::summarize_all(result);
+        const harness::ArmSummary& sor = summaries[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
+        const harness::ArmSummary& naive = summaries[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
         bool valid = result.total_drops == 0 && sor.mean_fill_rate >= 0.5 && naive.mean_fill_rate >= 0.5;
         double score = objective(sor, naive);
@@ -299,12 +302,14 @@ int main(int argc, char** argv) {
     confirm_best.harness.seed_base = 1000;
 
     harness::MonteCarloRunResult before_result = harness::run_monte_carlo(confirm_default);
-    harness::ArmSummary before_sor = harness::summarize(before_result.sor_rows);
-    harness::ArmSummary before_naive = harness::summarize(before_result.naive_rows);
+    harness::ArmSummaries before = harness::summarize_all(before_result);
+    const harness::ArmSummary& before_sor = before[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
+    const harness::ArmSummary& before_naive = before[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
     harness::MonteCarloRunResult after_result = harness::run_monte_carlo(confirm_best);
-    harness::ArmSummary after_sor = harness::summarize(after_result.sor_rows);
-    harness::ArmSummary after_naive = harness::summarize(after_result.naive_rows);
+    harness::ArmSummaries after = harness::summarize_all(after_result);
+    const harness::ArmSummary& after_sor = after[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
+    const harness::ArmSummary& after_naive = after[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
     if (before_result.total_drops > 0 || after_result.total_drops > 0) {
         std::cerr << "[ WARN ] confirmatory run saw drops (before=" << before_result.total_drops
@@ -312,9 +317,9 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "\n=== BEFORE: current defaults ===";
-    harness::print_comparison(before_sor, before_naive, confirm_default);
+    harness::print_comparison(confirm_default.harness.arms, before, confirm_default);
     std::cout << "\n=== AFTER: calibrated config ===";
-    harness::print_comparison(after_sor, after_naive, confirm_best);
+    harness::print_comparison(confirm_best.harness.arms, after, confirm_best);
 
     double edge_before = objective(before_sor, before_naive);
     double edge_after = objective(after_sor, after_naive);
@@ -324,9 +329,9 @@ int main(int argc, char** argv) {
               << "  improvement = " << (edge_after - edge_before) << "\n";
 
     std::string before_path = "results/calibration_confirmatory_before_" + harness::timestamp_string() + ".csv";
-    harness::export_csv(before_result.sor_rows, before_result.naive_rows, before_path);
+    harness::export_csv(before_result, before_path);
     std::string after_path = "results/calibration_confirmatory_after_" + harness::timestamp_string() + ".csv";
-    harness::export_csv(after_result.sor_rows, after_result.naive_rows, after_path);
+    harness::export_csv(after_result, after_path);
     std::cout << "[ CALIBRATE ] wrote " << before_path << " and " << after_path << "\n";
 
     print_config_literal(best_config);

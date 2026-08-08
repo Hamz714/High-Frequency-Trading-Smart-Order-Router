@@ -45,22 +45,22 @@ std::vector<ClientOrderSpec> generate_order_flow(uint32_t trial_seed, const SimC
 }
 
 bool operator==(const SubmitKey& a, const SubmitKey& b) {
-    return a.trial == b.trial && a.naive == b.naive && a.order_id == b.order_id;
+    return a.trial == b.trial && a.arm == b.arm && a.order_id == b.order_id;
 }
 
 size_t SubmitKeyHash::operator()(const SubmitKey& key) const noexcept {
     size_t h = std::hash<int>{}(key.trial);
-    h ^= std::hash<bool>{}(key.naive) + 0x9e3779b9 + (h << 6) + (h >> 2);
+    h ^= std::hash<int>{}(static_cast<int>(key.arm)) + 0x9e3779b9 + (h << 6) + (h >> 2);
     h ^= std::hash<OrderID>{}(key.order_id) + 0x9e3779b9 + (h << 6) + (h >> 2);
     return h;
 }
 
-void ResultsCollector::record_submit(int trial, bool naive, OrderID id) {
+void ResultsCollector::record_submit(int trial, RoutingStrategy arm, OrderID id) {
     std::lock_guard<std::mutex> lock(mtx);
-    submit_times_[SubmitKey{trial, naive, id}] = std::chrono::steady_clock::now();
+    submit_times_[SubmitKey{trial, arm, id}] = std::chrono::steady_clock::now();
 }
 
-bool ResultsCollector::wait_for_trial_reports(int trial, bool naive, std::chrono::milliseconds timeout) {
+bool ResultsCollector::wait_for_trial_reports(int trial, RoutingStrategy arm, std::chrono::milliseconds timeout) {
     auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         {
@@ -68,7 +68,7 @@ bool ResultsCollector::wait_for_trial_reports(int trial, bool naive, std::chrono
             bool any_pending = false;
             for (const auto& [key, submit_time] : submit_times_) {
                 (void)submit_time;
-                if (key.trial == trial && key.naive == naive) {
+                if (key.trial == trial && key.arm == arm) {
                     any_pending = true;
                     break;
                 }
@@ -80,7 +80,7 @@ bool ResultsCollector::wait_for_trial_reports(int trial, bool naive, std::chrono
     return false;
 }
 
-void ResultsCollector::record_report(int trial, bool naive, const ExecutionReport& report,
+void ResultsCollector::record_report(int trial, RoutingStrategy arm, const ExecutionReport& report,
                                       const std::unordered_map<VenueID, double>& fee_schedule) {
     auto now = std::chrono::steady_clock::now();
     double latency_us = -1.0;
@@ -95,7 +95,7 @@ void ResultsCollector::record_report(int trial, bool naive, const ExecutionRepor
 
     std::lock_guard<std::mutex> lock(mtx);
 
-    SubmitKey key{trial, naive, report.parent_id};
+    SubmitKey key{trial, arm, report.parent_id};
     auto it = submit_times_.find(key);
     if (it != submit_times_.end()) {
         latency_us = std::chrono::duration<double, std::micro>(now - it->second).count();
@@ -103,7 +103,7 @@ void ResultsCollector::record_report(int trial, bool naive, const ExecutionRepor
     }
 
     rows.push_back(TrialRow{
-        trial, naive, report.parent_id, report.side,
+        trial, arm, report.parent_id, report.side,
         report.intended_size, report.filled_size, report.fill_rate,
         report.decision_price, report.avg_fill_price,
         report.implementation_shortfall, report.vwap_slippage,
@@ -111,7 +111,7 @@ void ResultsCollector::record_report(int trial, bool naive, const ExecutionRepor
     });
 }
 
-TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
+TrialOutcome run_trial(int trial, uint32_t trial_seed, RoutingStrategy arm,
                         const std::vector<ClientOrderSpec>& script,
                         const SimConfig& config, ResultsCollector& collector) {
     SimClock clock;
@@ -140,7 +140,7 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
     auto analytics = std::make_unique<AnalyticsEngine>(queues.analytics_trade, queues.analytics_order);
     analytics->set_clock(&clock);
     analytics->on_report([&](const ExecutionReport& report) {
-        collector.record_report(trial, use_naive_split, report, fee_schedule);
+        collector.record_report(trial, arm, report, fee_schedule);
         if (config.verbose_reports) print_report(report);
     });
 
@@ -151,7 +151,7 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
     RouterConfig router_cfg{ .lot_size = config.router.lot_size,
                               .latency_cost_factor = config.router.latency_cost_factor,
                               .dark_pool_decay_rate = config.router.dark_pool_decay_rate,
-                              .use_naive_split = use_naive_split,
+                              .strategy = arm,
                               .max_reroute_attempts = config.router.max_reroute_attempts };
 
     auto router = std::make_unique<SmartOrderRouter>(router_cfg, queues);
@@ -185,7 +185,7 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
         std::this_thread::sleep_for(std::chrono::milliseconds(spec.delay_ms));
 
         OrderID order_id = spec.order_index;
-        collector.record_submit(trial, use_naive_split, order_id);
+        collector.record_submit(trial, arm, order_id);
 
         router->submit_order({ .order_id = order_id, .sender_type = SenderType::SOR,
                                 .request_type = RequestType::ORDER, .side = spec.side,
@@ -194,9 +194,9 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
     }
 
     bool completed = collector.wait_for_trial_reports(
-        trial, use_naive_split, std::chrono::seconds(config.harness.report_wait_timeout_s));
+        trial, arm, std::chrono::seconds(config.harness.report_wait_timeout_s));
     if (!completed) {
-        std::cerr << "[ WARN ] trial " << trial << " (" << (use_naive_split ? "naive" : "sor")
+        std::cerr << "[ WARN ] trial " << trial << " (" << routing_strategy_tag(arm)
                   << ") timed out waiting for all order reports\n";
     }
 
@@ -253,11 +253,12 @@ ArmSummary summarize(const std::vector<TrialRow>& rows) {
     return summary;
 }
 
-bool passes_validity_gate(const ArmSummary& sor, const ArmSummary& naive,
+bool passes_validity_gate(const std::vector<RoutingStrategy>& arms, const ArmSummaries& summaries,
                            uint64_t total_drops, const ValidityGate& gate) {
     if (total_drops > gate.max_allowed_drops) return false;
-    if (sor.mean_fill_rate < gate.min_fill_rate) return false;
-    if (naive.mean_fill_rate < gate.min_fill_rate) return false;
+    for (RoutingStrategy arm : arms) {
+        if (summaries[static_cast<size_t>(arm)].mean_fill_rate < gate.min_fill_rate) return false;
+    }
     return true;
 }
 
@@ -269,12 +270,11 @@ MonteCarloRunResult run_monte_carlo(const SimConfig& config, bool show_progress)
         uint32_t trial_seed = config.harness.seed_base + static_cast<uint32_t>(trial);
         std::vector<ClientOrderSpec> script = generate_order_flow(trial_seed, config);
 
-        TrialOutcome sor_outcome = run_trial(trial, trial_seed, /*use_naive_split=*/false, script, config, collector);
-        TrialOutcome naive_outcome = run_trial(trial, trial_seed, /*use_naive_split=*/true, script, config, collector);
-
-        result.total_drops += sor_outcome.total_drops + naive_outcome.total_drops;
-        if (!sor_outcome.completed_without_timeout) result.timed_out_trial_arms++;
-        if (!naive_outcome.completed_without_timeout) result.timed_out_trial_arms++;
+        for (RoutingStrategy arm : config.harness.arms) {
+            TrialOutcome outcome = run_trial(trial, trial_seed, arm, script, config, collector);
+            result.total_drops += outcome.total_drops;
+            if (!outcome.completed_without_timeout) result.timed_out_trial_arms++;
+        }
 
         if (show_progress && ((trial + 1) % 5 == 0 || trial + 1 == config.harness.num_trials)) {
             std::cout << "[ MAIN ] completed trial " << (trial + 1) << "/" << config.harness.num_trials << "\n";
@@ -284,45 +284,85 @@ MonteCarloRunResult run_monte_carlo(const SimConfig& config, bool show_progress)
     {
         std::lock_guard<std::mutex> lock(collector.mtx);
         for (const auto& row : collector.rows) {
-            (row.naive ? result.naive_rows : result.sor_rows).push_back(row);
+            result.arm_rows[static_cast<size_t>(row.arm)].push_back(row);
         }
     }
 
     return result;
 }
 
-void print_row(const std::string& label, double sor_v, double naive_v) {
-    std::cout << std::left << std::setw(30) << label
-              << std::right << std::setw(15) << std::fixed << std::setprecision(3) << sor_v
-              << std::setw(15) << naive_v
-              << std::setw(15) << (sor_v - naive_v) << "\n";
+ArmSummaries summarize_all(const MonteCarloRunResult& result) {
+    ArmSummaries summaries;
+    for (size_t i = 0; i < NUM_ROUTING_STRATEGIES; ++i) {
+        summaries[i] = summarize(result.arm_rows[i]);
+    }
+    return summaries;
 }
 
-void print_comparison(const ArmSummary& sor, const ArmSummary& naive, const SimConfig& config) {
-    std::cout << "\n=== SOR (DP-Optimal) vs. Naive Baseline: Monte Carlo Comparison ===\n";
+const char* short_arm_name(RoutingStrategy arm) {
+    switch (arm) {
+        case RoutingStrategy::DP_OPTIMAL:   return "SOR";
+        case RoutingStrategy::PROPORTIONAL: return "Prop";
+        case RoutingStrategy::NAIVE:        return "Naive";
+    }
+    return "?";
+}
+
+void print_row(const std::string& label, const std::vector<double>& values) {
+    std::cout << std::left << std::setw(30) << label << std::right << std::fixed << std::setprecision(3);
+    for (double value : values) std::cout << std::setw(15) << value;
+    for (size_t i = 1; i < values.size(); ++i) std::cout << std::setw(15) << (values[0] - values[i]);
+    std::cout << "\n";
+}
+
+void print_comparison(const std::vector<RoutingStrategy>& arms, const ArmSummaries& summaries,
+                       const SimConfig& config) {
+    if (arms.empty()) return;
+
+    std::vector<const ArmSummary*> arm_summaries;
+    for (RoutingStrategy arm : arms) arm_summaries.push_back(&summaries[static_cast<size_t>(arm)]);
+
+    std::cout << "\n=== " << routing_strategy_label(arms.front())
+              << " vs. baselines: Monte Carlo Comparison ===\n";
     std::cout << "Trials: " << config.harness.num_trials << "  Orders/trial: " << config.harness.orders_per_trial
-              << "  Samples/arm: " << sor.sample_count << "\n\n";
+              << "  Samples/arm: " << arm_summaries.front()->sample_count << "\n\n";
 
-    std::cout << std::left << std::setw(30) << "Metric"
-              << std::right << std::setw(15) << "SOR"
-              << std::setw(15) << "Naive"
-              << std::setw(15) << "Delta" << "\n";
-    std::cout << std::string(75, '-') << "\n";
+    std::cout << std::left << std::setw(30) << "Metric" << std::right;
+    for (RoutingStrategy arm : arms) std::cout << std::setw(15) << routing_strategy_label(arm);
+    for (size_t i = 1; i < arms.size(); ++i) {
+        std::cout << std::setw(15) << (std::string(short_arm_name(arms[0])) + "-" + short_arm_name(arms[i]));
+    }
+    std::cout << "\n";
+    std::cout << std::string(30 + 15 * (2 * arms.size() - 1), '-') << "\n";
 
-    print_row("Impl. Shortfall (bps)", sor.mean_shortfall_bps, naive.mean_shortfall_bps);
-    print_row("VWAP Slippage (bps)", sor.mean_slippage_bps, naive.mean_slippage_bps);
-    print_row("Fill Rate (%)", sor.mean_fill_rate * 100.0, naive.mean_fill_rate * 100.0);
-    print_row("Total Fees ($)", sor.total_fees, naive.total_fees);
-    print_row("Tick-to-Trade p50 (us)", sor.p50_latency_us, naive.p50_latency_us);
-    print_row("Tick-to-Trade p95 (us)", sor.p95_latency_us, naive.p95_latency_us);
-    print_row("Tick-to-Trade p99 (us)", sor.p99_latency_us, naive.p99_latency_us);
+    auto column = [&arm_summaries](double (*extract)(const ArmSummary&)) {
+        std::vector<double> values;
+        for (const ArmSummary* summary : arm_summaries) values.push_back(extract(*summary));
+        return values;
+    };
+
+    print_row("Impl. Shortfall (bps)", column([](const ArmSummary& s) { return s.mean_shortfall_bps; }));
+    print_row("VWAP Slippage (bps)", column([](const ArmSummary& s) { return s.mean_slippage_bps; }));
+    print_row("Fill Rate (%)", column([](const ArmSummary& s) { return s.mean_fill_rate * 100.0; }));
+    print_row("Total Fees ($)", column([](const ArmSummary& s) { return s.total_fees; }));
+    print_row("Tick-to-Trade p50 (us)", column([](const ArmSummary& s) { return s.p50_latency_us; }));
+    print_row("Tick-to-Trade p95 (us)", column([](const ArmSummary& s) { return s.p95_latency_us; }));
+    print_row("Tick-to-Trade p99 (us)", column([](const ArmSummary& s) { return s.p99_latency_us; }));
+
+    std::cout << "\nArms: SOR routes by the cost-minimising dynamic program (fees, impact, latency,\n"
+                 "dark fill probability). Proportional splits the parent across lit venues in\n"
+                 "proportion to displayed size at the limit price - a real desk's fair baseline,\n"
+                 "liquidity-aware but blind to fees, impact curvature and the dark pool. Naive\n"
+                 "dumps the whole parent on the single best-priced lit venue; it is an isolator\n"
+                 "for the routing decision, not a competitor.\n";
     std::cout << "\nNote: tick-to-trade here measures wall-clock submit->completion through the full\n"
                  "concurrent pipeline (8 OS threads/trial, spawned and joined fresh per run), on\n"
                  "whatever else is running on this machine - it is not an isolated measurement of\n"
-                 "routing-algorithm cost alone, and will vary run to run with host load. SOR's\n"
-                 "multi-venue split + reroute cascade needs more cross-thread round trips than\n"
-                 "naive's single-venue dispatch, so it is structurally more exposed to that noise.\n"
-                 "For a clean, threading-free view of raw data-structure speed, see bench_lob.\n";
+                 "routing-algorithm cost alone, and will vary run to run with host load. The\n"
+                 "multi-venue arms' split + reroute cascade needs more cross-thread round trips\n"
+                 "than naive's single-venue dispatch, so they are structurally more exposed to\n"
+                 "that noise. For a clean, threading-free view of raw data-structure speed, see\n"
+                 "bench_lob.\n";
 }
 
 std::string timestamp_string() {
@@ -339,8 +379,7 @@ std::string timestamp_string() {
     return oss.str();
 }
 
-void export_csv(const std::vector<TrialRow>& sor_rows, const std::vector<TrialRow>& naive_rows,
-                 const std::string& path) {
+void export_csv(const MonteCarloRunResult& result, const std::string& path) {
     std::ofstream out(path);
     out << "trial,arm,order_id,side,intended_size,filled_size,fill_rate,decision_price,"
            "avg_fill_price,implementation_shortfall,vwap_slippage,timed_out,tick_to_trade_us,fees_paid\n";
@@ -348,7 +387,7 @@ void export_csv(const std::vector<TrialRow>& sor_rows, const std::vector<TrialRo
     auto write_rows = [&out](const std::vector<TrialRow>& rows) {
         for (const auto& row : rows) {
             out << row.trial << ","
-                << (row.naive ? "naive" : "sor") << ","
+                << routing_strategy_tag(row.arm) << ","
                 << row.order_id << ","
                 << (row.side == BUY ? "BUY" : "SELL") << ","
                 << row.intended_size << ","
@@ -364,8 +403,7 @@ void export_csv(const std::vector<TrialRow>& sor_rows, const std::vector<TrialRo
         }
     };
 
-    write_rows(sor_rows);
-    write_rows(naive_rows);
+    for (const auto& rows : result.arm_rows) write_rows(rows);
 }
 
 }  // namespace harness

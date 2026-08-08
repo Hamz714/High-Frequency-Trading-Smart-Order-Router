@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <vector>
 
 #include "common/Types.h"
 
@@ -43,6 +44,7 @@ struct HarnessConfig {
     int warmup_ms;
     int report_wait_timeout_s;
     uint32_t seed_base;
+    std::vector<RoutingStrategy> arms;
 };
 
 struct SimConfig {

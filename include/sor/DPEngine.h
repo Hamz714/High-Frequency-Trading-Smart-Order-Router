@@ -21,5 +21,7 @@ class DPEngine{
 
         SplitResult compute_optimal_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues);
 
+        SplitResult compute_proportional_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues);
+
         SplitResult compute_naive_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues);
 };

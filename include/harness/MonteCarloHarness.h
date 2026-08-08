@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <mutex>
@@ -24,7 +25,7 @@ std::vector<ClientOrderSpec> generate_order_flow(uint32_t trial_seed, const SimC
 
 struct TrialRow {
     int trial;
-    bool naive;
+    RoutingStrategy arm;
     OrderID order_id;
     Side side;
     int64_t intended_size;
@@ -41,7 +42,7 @@ struct TrialRow {
 
 struct SubmitKey {
     int trial;
-    bool naive;
+    RoutingStrategy arm;
     OrderID order_id;
 };
 
@@ -56,11 +57,11 @@ public:
     std::mutex mtx;
     std::vector<TrialRow> rows;
 
-    void record_submit(int trial, bool naive, OrderID id);
+    void record_submit(int trial, RoutingStrategy arm, OrderID id);
 
-    bool wait_for_trial_reports(int trial, bool naive, std::chrono::milliseconds timeout);
+    bool wait_for_trial_reports(int trial, RoutingStrategy arm, std::chrono::milliseconds timeout);
 
-    void record_report(int trial, bool naive, const ExecutionReport& report,
+    void record_report(int trial, RoutingStrategy arm, const ExecutionReport& report,
                         const std::unordered_map<VenueID, double>& fee_schedule);
 
 private:
@@ -72,7 +73,7 @@ struct TrialOutcome {
     bool completed_without_timeout = true;
 };
 
-TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
+TrialOutcome run_trial(int trial, uint32_t trial_seed, RoutingStrategy arm,
                         const std::vector<ClientOrderSpec>& script,
                         const SimConfig& config, ResultsCollector& collector);
 
@@ -89,26 +90,33 @@ struct ArmSummary {
 
 ArmSummary summarize(const std::vector<TrialRow>& rows);
 
+using ArmSummaries = std::array<ArmSummary, NUM_ROUTING_STRATEGIES>;
+
 struct ValidityGate {
     uint64_t max_allowed_drops = 0;
     double min_fill_rate = 0.5;
 };
 
-bool passes_validity_gate(const ArmSummary& sor, const ArmSummary& naive,
+bool passes_validity_gate(const std::vector<RoutingStrategy>& arms, const ArmSummaries& summaries,
                            uint64_t total_drops, const ValidityGate& gate);
 
 struct MonteCarloRunResult {
-    std::vector<TrialRow> sor_rows;
-    std::vector<TrialRow> naive_rows;
+    std::array<std::vector<TrialRow>, NUM_ROUTING_STRATEGIES> arm_rows;
     uint64_t total_drops = 0;
     int timed_out_trial_arms = 0;
+
+    const std::vector<TrialRow>& rows(RoutingStrategy arm) const {
+        return arm_rows[static_cast<size_t>(arm)];
+    }
 };
 
 MonteCarloRunResult run_monte_carlo(const SimConfig& config, bool show_progress = true);
 
-void print_comparison(const ArmSummary& sor, const ArmSummary& naive, const SimConfig& config);
-void export_csv(const std::vector<TrialRow>& sor_rows, const std::vector<TrialRow>& naive_rows,
-                 const std::string& path);
+ArmSummaries summarize_all(const MonteCarloRunResult& result);
+
+void print_comparison(const std::vector<RoutingStrategy>& arms, const ArmSummaries& summaries,
+                       const SimConfig& config);
+void export_csv(const MonteCarloRunResult& result, const std::string& path);
 std::string timestamp_string();
 
 }  // namespace harness

@@ -95,11 +95,33 @@ inline QueueSizingConfig default_queue_sizing() {
                               DEFAULT_QUEUE_CAPACITY };
 }
 
+enum class RoutingStrategy { DP_OPTIMAL, PROPORTIONAL, NAIVE };
+
+inline constexpr size_t NUM_ROUTING_STRATEGIES = 3;
+
+inline const char* routing_strategy_tag(RoutingStrategy strategy) {
+    switch (strategy) {
+        case RoutingStrategy::DP_OPTIMAL:   return "sor";
+        case RoutingStrategy::PROPORTIONAL: return "proportional";
+        case RoutingStrategy::NAIVE:        return "naive";
+    }
+    return "unknown";
+}
+
+inline const char* routing_strategy_label(RoutingStrategy strategy) {
+    switch (strategy) {
+        case RoutingStrategy::DP_OPTIMAL:   return "SOR (DP)";
+        case RoutingStrategy::PROPORTIONAL: return "Proportional";
+        case RoutingStrategy::NAIVE:        return "Naive";
+    }
+    return "Unknown";
+}
+
 struct RouterConfig {
     int64_t lot_size;
     int64_t latency_cost_factor;
     double dark_pool_decay_rate;
-    bool use_naive_split;
+    RoutingStrategy strategy;
     int max_reroute_attempts;
 };
 

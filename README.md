@@ -1,17 +1,20 @@
 # High-Frequency Trading Smart Order Router
 
-A multi-venue smart order router (SOR) in C++20, benchmarked against a naive
-best-price baseline inside a purpose-built, agent-based market simulator.
+A multi-venue smart order router (SOR) in C++20, benchmarked against two
+baselines inside a purpose-built, agent-based market simulator.
 
 The router decides **how to split a large parent order across competing venues** —
 two lit exchanges and one dark pool — by solving a dynamic program over expected
 execution cost, then works the order through IOC child orders and reroutes
 whatever comes back unfilled.
 
-Against a naive router that simply sweeps the venue showing the best price, the
-DP router cuts implementation shortfall by **~68%** and pays **~39% less in fees**,
-while filling more of the order. Venue latency is simulated, not just priced — a
-child order is held on the wire and quotes reach the router stale.
+Against **proportional-by-displayed-size** allocation — the fair baseline, and
+what a simple production router actually does — the DP router cuts implementation
+shortfall by **~60%** and pays **~34% less in fees**. Against a naive best-price
+sweep it cuts shortfall by **~66%**. Both baselines are reported side by side,
+because the naive one isolates the routing decision while the proportional one is
+the honest opponent. Venue latency is simulated, not just priced — a child order
+is held on the wire and quotes reach the router stale.
 
 [![CI](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml/badge.svg)](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml)
 
@@ -19,18 +22,23 @@ child order is held on the wire and quotes reach the router stale.
 
 ## Results
 
-100 Monte Carlo trials × 6 parent orders × 2 arms (1,200 executions), with venue
-latency simulated. Both arms run against the same seeded market, so the only
-variable is the routing decision.
+100 Monte Carlo trials × 6 parent orders × 3 arms (1,800 executions), with venue
+latency simulated. All three arms run against the same seeded market, so the only
+variable is the routing decision. Zero dropped messages.
 
-| Metric | SOR (DP) | Naive | Delta |
-|---|---:|---:|---:|
-| Implementation shortfall (bps) | **8.03** | 24.99 | **−16.96** |
-| VWAP slippage (bps) | **8.85** | 25.46 | **−16.61** |
-| Fill rate (%) | **96.84** | 91.21 | **+5.64** |
-| Total fees ($) | **1079.90** | 1774.56 | **−694.66** |
+| Metric | SOR (DP) | Proportional | Naive | vs. Proportional | vs. Naive |
+|---|---:|---:|---:|---:|---:|
+| Implementation shortfall (bps) | **8.84** | 21.90 | 25.79 | **−59.6%** | **−65.7%** |
+| VWAP slippage (bps) | **8.42** | 18.78 | 25.98 | **−55.2%** | **−67.6%** |
+| Fill rate (%) | **97.84** | 91.85 | 91.27 | **+5.99 pp** | **+6.57 pp** |
+| Total fees ($) | **1093.38** | 1659.59 | 1847.44 | **−34.1%** | **−40.8%** |
 
-Raw per-order data: [`results/baseline/sor_vs_naive.csv`](results/baseline/sor_vs_naive.csv).
+The ordering is the sanity check: proportional sits between the two on every
+metric. It beats naive because splitting by displayed size avoids running one
+venue's book, and it loses to the DP because it cannot see fees, the convexity of
+impact, or the dark pool.
+
+Raw per-order data: [`results/baseline/sor_vs_baselines.csv`](results/baseline/sor_vs_baselines.csv).
 Reproduce with `./high_frequency --trials 100`.
 
 **On run-to-run stability.** Trial seeds are deterministic (`seed_base + trial`),
@@ -41,6 +49,14 @@ and 10.6 bps against the *same* seeded markets. That spread is scheduling
 nondeterminism, not sampling
 variation, and it is why the headline table above uses 100 trials rather than 25.
 Read single-run differences smaller than a few bps as noise.
+
+The same nondeterminism shows up in queue pressure. One 100-trial three-arm run
+reported 1,230 dropped messages; an identical re-run on the same seeds reported
+zero, which is the run quoted above. Nothing about the arms changed between them,
+so the drops are host scheduling — the router's market-data thread losing enough
+ground under load to overflow an 8,192-deep ring — not a property of any routing
+strategy. The counters exist so that a run which does drop can be identified and
+discarded rather than quietly averaged in.
 
 ### What simulating latency changed
 
@@ -193,8 +209,23 @@ row-major arrays and the previous row is pre-reversed, so the inner loop walks
 two arrays forward instead of one forward and one backward — a materially better
 access pattern than the naive `dp[k-1][n-x]` indexing.
 
-The naive baseline it is measured against sends the entire order to whichever
-lit venue currently shows the best price.
+### The two baselines it is measured against
+
+**Naive** sends the entire order to whichever lit venue currently shows the best
+price. It is not a competitor — no desk routes this way — it is an *isolator*:
+the crudest possible decision rule, run against the same seeded market with
+everything else held constant, so the delta attributes cleanly to the routing
+decision and nothing else.
+
+**Proportional by displayed size** is the fair baseline. It splits the parent
+across lit venues in proportion to the size each is displaying at or better than
+the limit price (largest-remainder apportionment over lots, sub-lot remainder to
+the deepest venue), then reroutes what comes back unfilled exactly like the other
+arms. It is liquidity-aware and genuinely reasonable — close to what a simple
+production router does — but it is blind to the three things the DP prices:
+per-venue fees, the convexity of impact in size, and the dark pool. That is the
+comparison that shows what the dynamic program is actually buying, and the gap
+narrows substantially against it.
 
 ---
 
@@ -287,12 +318,12 @@ Eight threads per trial, spawned and joined fresh each run.
 |---|---|
 | [`LimitOrderBook`](src/lob/LimitOrderBook.cpp) | Price-time priority book; hybrid ladder + overflow map |
 | [`Venue`](src/lob/Venue.cpp) | Owns a book, matches on its own thread, publishes deltas and fills, holds inbound router orders for its link time |
-| [`DPEngine`](src/sor/DPEngine.cpp) | The allocation dynamic program and the naive baseline |
+| [`DPEngine`](src/sor/DPEngine.cpp) | The allocation dynamic program and both baseline split rules |
 | [`SmartOrderRouter`](src/sor/SmartOrderRouter.cpp) | Mirror books, parent/child lifecycle, reroute cascade |
 | [`AnalyticsEngine`](src/analytics/AnalyticsEngine.cpp) | Execution quality metrics, off the hot path |
 | [`SPSCQueue`](include/common/SPSCQueue.h) / [`MPSCQueue`](include/common/MPSCQueue.h) | Bounded lock-free ring buffers with drop counters |
 | [`SimulationEngine`](src/sim/SimulationEngine.cpp) | Drives a virtual clock, market makers, and noise traders |
-| [`MonteCarloHarness`](src/harness/MonteCarloHarness.cpp) | Runs both arms over identical seeded markets |
+| [`MonteCarloHarness`](src/harness/MonteCarloHarness.cpp) | Runs every arm over identical seeded markets |
 
 ### Order book design
 
@@ -326,12 +357,13 @@ The build defaults to `Release` when no build type is given — latency numbers
 from an unoptimised binary are meaningless, so this is deliberate.
 
 ```bash
-./build/high_frequency               # SOR vs naive Monte Carlo comparison
-./build/high_frequency -v            # ...with a per-order report breakdown
-./build/high_frequency --no-latency  # ...with venue latency simulation disabled
-./build/high_frequency --trials 100  # ...over more trials, to shrink run-to-run noise
-./build/bench_lob                    # order book microbenchmark
-./build/calibrate                    # randomised parameter sweep
+./build/high_frequency                  # SOR vs proportional vs naive Monte Carlo comparison
+./build/high_frequency -v               # ...with a per-order report breakdown
+./build/high_frequency --no-latency     # ...with venue latency simulation disabled
+./build/high_frequency --trials 100     # ...over more trials, to shrink run-to-run noise
+./build/high_frequency --no-proportional # ...SOR vs naive only, for a faster two-arm run
+./build/bench_lob                       # order book microbenchmark
+./build/calibrate                       # randomised parameter sweep
 ```
 
 Each writes a timestamped CSV into `results/`. The committed baselines in
@@ -339,7 +371,7 @@ Each writes a timestamped CSV into `results/`. The committed baselines in
 
 ### Tests
 
-142 GoogleTest cases across the book, queues, router, DP engine, simulation
+157 GoogleTest cases across the book, queues, router, DP engine, simulation
 agents, analytics, and the venue latency model.
 
 ```bash
@@ -385,12 +417,28 @@ particular was tuned against a penalty that cost the router nothing, so it is
 now fit to the wrong environment. Re-running the sweep under simulated latency
 is the obvious next step and would likely move it.
 
+The sweep also still scores candidates by SOR-vs-naive edge, and runs only those
+two arms to keep its cost down. Since naive is the isolator rather than the
+baseline worth beating, that objective now optimises against the weaker opponent;
+rescoring it against the proportional arm is the second thing to fix here. The
+reported comparison is unaffected — that runs all three arms — but the tuned
+defaults were chosen under the old objective.
+
 ---
 
 ## Measurement honesty
 
 A few things this project deliberately does not claim:
 
+- **The naive baseline is an isolator, not a competitor.** Dumping a whole parent
+  order on the best-priced venue is deliberately bad execution; no desk routes
+  that way, and a large improvement over it is a weaker claim than the percentage
+  makes it sound. It earns its place by holding everything except the routing
+  decision constant, not by being a fair opponent. That is why the
+  proportional-by-displayed-size arm exists: it is the baseline a real desk would
+  actually defend, and the honest headline is the SOR's margin over *that*. Both
+  are reported side by side, and the naive column is kept because the two
+  together bound the answer.
 - **Tick-to-trade is not an algorithm benchmark.** The binary reports it, but it
   measures wall-clock submit→completion across eight threads that are spawned
   and joined per trial, on a loaded desktop OS. The SOR's multi-venue split and
@@ -423,8 +471,8 @@ A few things this project deliberately does not claim:
 - **The simulator is not a market.** Prices follow geometric Brownian motion,
   market makers quote off a fair value with a volatility-sensitive spread, and
   noise traders arrive as a Poisson process with lognormal sizes. That is enough
-  to make routing decisions matter and to differentiate the two strategies; it is
-  not a claim of realism against live venue microstructure.
+  to make routing decisions matter and to differentiate the three strategies; it
+  is not a claim of realism against live venue microstructure.
 - **Dropped messages are surfaced, not hidden.** Every queue counts drops, the
   counts are rolled up across the object graph, and a non-zero total prints a
   warning that the run's metrics may be biased.

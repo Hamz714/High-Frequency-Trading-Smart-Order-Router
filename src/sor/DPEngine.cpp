@@ -1,5 +1,8 @@
 #include "sor/DPEngine.h"
 
+#include <algorithm>
+#include <utility>
+
 DPEngine::DPEngine(const RouterConfig& cfg):
     config(cfg) {}
 
@@ -184,6 +187,74 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
             result.allocations[best_index] += remainder;
         }
     }
+
+    return result;
+}
+
+SplitResult DPEngine::compute_proportional_split(int64_t total_size, Side side, int64_t worst_price, const std::vector<VenueState>& venues) {
+    SplitResult result;
+    result.allocations.assign(venues.size(), 0);
+    result.expected_cost = std::numeric_limits<double>::max();
+
+    std::vector<int64_t> displayed(venues.size(), 0);
+    int64_t total_displayed = 0;
+
+    for (size_t i = 0; i < venues.size(); ++i) {
+        if (venues[i].config.type != LIT) continue;
+        displayed[i] = venues[i].get_visible_liquidity(side, worst_price);
+        total_displayed += displayed[i];
+    }
+
+    if (total_displayed == 0) return result;
+
+    int64_t num_lots = total_size / config.lot_size;
+
+    std::vector<int64_t> lots(venues.size(), 0);
+    std::vector<std::pair<double, size_t>> fractional_parts;
+    int64_t assigned_lots = 0;
+
+    for (size_t i = 0; i < venues.size(); ++i) {
+        if (displayed[i] == 0) continue;
+
+        double exact_share = static_cast<double>(num_lots) * static_cast<double>(displayed[i])
+                             / static_cast<double>(total_displayed);
+        int64_t whole_lots = static_cast<int64_t>(exact_share);
+
+        lots[i] = whole_lots;
+        assigned_lots += whole_lots;
+        fractional_parts.push_back({exact_share - static_cast<double>(whole_lots), i});
+    }
+
+    std::sort(fractional_parts.begin(), fractional_parts.end(),
+              [&displayed](const std::pair<double, size_t>& a, const std::pair<double, size_t>& b) {
+                  if (a.first != b.first) return a.first > b.first;
+                  return displayed[a.second] > displayed[b.second];
+              });
+
+    for (size_t k = 0; assigned_lots < num_lots; ++k, ++assigned_lots) {
+        lots[fractional_parts[k % fractional_parts.size()].second]++;
+    }
+
+    for (size_t i = 0; i < venues.size(); ++i) {
+        result.allocations[i] = lots[i] * config.lot_size;
+    }
+
+    int64_t remainder = total_size % config.lot_size;
+    if (remainder > 0) {
+        size_t deepest_index = fractional_parts.front().second;
+        for (size_t i = 0; i < venues.size(); ++i) {
+            if (displayed[i] > displayed[deepest_index]) deepest_index = i;
+        }
+        result.allocations[deepest_index] += remainder;
+    }
+
+    double total_cost = 0.0;
+    for (size_t i = 0; i < venues.size(); ++i) {
+        if (result.allocations[i] > 0) {
+            total_cost += calculate_lit_cost(venues[i], result.allocations[i], displayed[i]);
+        }
+    }
+    result.expected_cost = total_cost;
 
     return result;
 }

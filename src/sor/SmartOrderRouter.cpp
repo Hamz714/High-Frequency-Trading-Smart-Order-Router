@@ -31,9 +31,15 @@ void SmartOrderRouter::set_analytics_queue(SPSCQueue<OrderLifecycleEvent>* queue
 }
 
 SplitResult SmartOrderRouter::compute_split(int64_t size, Side side, int64_t worst_price) {
-    return config.use_naive_split
-        ? dp_engine.compute_naive_split(size, side, worst_price, venue_states)
-        : dp_engine.compute_optimal_split(size, side, worst_price, venue_states);
+    switch (config.strategy) {
+        case RoutingStrategy::NAIVE:
+            return dp_engine.compute_naive_split(size, side, worst_price, venue_states);
+        case RoutingStrategy::PROPORTIONAL:
+            return dp_engine.compute_proportional_split(size, side, worst_price, venue_states);
+        case RoutingStrategy::DP_OPTIMAL:
+            break;
+    }
+    return dp_engine.compute_optimal_split(size, side, worst_price, venue_states);
 }
 
 double SmartOrderRouter::compute_consolidated_mid() const {

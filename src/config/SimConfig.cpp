@@ -46,6 +46,7 @@ SimConfig default_sim_config() {
     config.harness.warmup_ms = 100;
     config.harness.report_wait_timeout_s = 3;
     config.harness.seed_base = 1000;
+    config.harness.arms = { RoutingStrategy::DP_OPTIMAL, RoutingStrategy::PROPORTIONAL, RoutingStrategy::NAIVE };
 
     config.queues = QueueSizingConfig{ .order_inbox = 8192, .market_data = 8192, .fill = 4096,
                                         .analytics_trade = 65'536, .analytics_order = 4096 };

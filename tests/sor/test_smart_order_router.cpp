@@ -18,12 +18,14 @@ bool wait_pop(Queue& queue, T& out, std::chrono::milliseconds timeout = std::chr
     return false;
 }
 
-RouterConfig make_router_config(int64_t lot_size = 10, bool use_naive = false, int max_reroute_attempts = 3) {
+RouterConfig make_router_config(int64_t lot_size = 10,
+                                 RoutingStrategy strategy = RoutingStrategy::DP_OPTIMAL,
+                                 int max_reroute_attempts = 3) {
     return RouterConfig{
         .lot_size = lot_size,
         .latency_cost_factor = 0,
         .dark_pool_decay_rate = 0.05,
-        .use_naive_split = use_naive,
+        .strategy = strategy,
         .max_reroute_attempts = max_reroute_attempts
     };
 }
@@ -131,6 +133,17 @@ protected:
         return false;
     }
 
+    bool wait_until_both_venues_fill(Side side, int64_t price, int64_t probe_qty,
+                                      std::chrono::milliseconds overall_timeout = std::chrono::seconds(3)) {
+        auto deadline = std::chrono::steady_clock::now() + overall_timeout;
+        while (std::chrono::steady_clock::now() < deadline) {
+            RoutingOutcome probe = submit_and_drain(side, price, probe_qty, std::chrono::milliseconds(200));
+            std::set<VenueID> venues(probe.fill_venues.begin(), probe.fill_venues.end());
+            if (venues.size() >= 2u) return true;
+        }
+        return false;
+    }
+
     bool confirm_venue_ready(Venue* venue, Side side, int64_t canary_price) {
         seed_liquidity(venue, side == BUY ? SELL : BUY, canary_price, 10);
         return warm_up(side, canary_price);
@@ -198,7 +211,7 @@ TEST_F(SmartOrderRouterTest, NoLiquidityAnywhere_CompletesWithTimedOutAndNoFills
 
 TEST_F(SmartOrderRouterTest, PartialLiquidity_CompletesPartiallyFilledAndTimedOut) {
     Venue* v1 = make_venue(1);
-    start_all(make_router_config(10, false, 2));
+    start_all(make_router_config(10, RoutingStrategy::DP_OPTIMAL, 2));
 
     seed_liquidity(v1, SELL, 100, 60);
     ASSERT_TRUE(warm_up(BUY, 200));
@@ -270,7 +283,7 @@ TEST_F(SmartOrderRouterTest, LatencyVenue_StillFillsThroughDelayedMarketDataAndF
 TEST_F(SmartOrderRouterTest, NaiveSplit_RoutesEntirelyToOneVenue) {
     Venue* v1 = make_venue(1);
     Venue* v2 = make_venue(2);
-    start_all(make_router_config(10, true));
+    start_all(make_router_config(10, RoutingStrategy::NAIVE));
 
     seed_liquidity(v1, SELL, 105, 1000);
     seed_liquidity(v2, SELL, 100, 1000);
@@ -285,6 +298,27 @@ TEST_F(SmartOrderRouterTest, NaiveSplit_RoutesEntirelyToOneVenue) {
     std::set<VenueID> distinct_venues(outcome.fill_venues.begin(), outcome.fill_venues.end());
     EXPECT_EQ(distinct_venues.size(), 1u);
     EXPECT_EQ(*distinct_venues.begin(), 2);
+}
+
+TEST_F(SmartOrderRouterTest, ProportionalSplit_SpreadsAcrossVenuesDespiteWorsePrice) {
+    Venue* v1 = make_venue(1);
+    Venue* v2 = make_venue(2);
+    start_all(make_router_config(10, RoutingStrategy::PROPORTIONAL));
+
+    seed_liquidity(v1, SELL, 105, 1000);
+    seed_liquidity(v2, SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(BUY, 200));
+
+    ASSERT_TRUE(wait_until_both_venues_fill(BUY, 200, 20));
+
+    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+
+    ASSERT_TRUE(outcome.completed);
+    EXPECT_EQ(outcome.total_filled, 100);
+    EXPECT_FALSE(outcome.completion.timed_out);
+
+    std::set<VenueID> distinct_venues(outcome.fill_venues.begin(), outcome.fill_venues.end());
+    EXPECT_EQ(distinct_venues.size(), 2u);
 }
 
 }  // namespace
