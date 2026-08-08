@@ -30,8 +30,8 @@ int main(int argc, char** argv) {
 
     if (result.total_drops > 0) {
         std::cerr << "[ WARN ] " << result.total_drops << " message(s) were silently dropped by full "
-                     "queues during this run - metrics may be biased. Consider increasing QUEUE_SIZE "
-                     "or reducing load.\n";
+                     "queues during this run - metrics may be biased. Consider increasing "
+                     "config.queues or reducing load.\n";
     }
     if (result.timed_out_trial_arms > 0) {
         std::cerr << "[ WARN ] " << result.timed_out_trial_arms << " trial/arm(s) timed out waiting "

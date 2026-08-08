@@ -30,6 +30,7 @@ SimConfig default_sim_config() {
     config.market.price_volatility = 0.0179987903;
     config.market.price_dt = 0.001;
     config.market.simulate_latency = true;
+    config.market.venue_order_pool_capacity = 65'536;
 
     config.router.lot_size = 27;
     config.router.latency_cost_factor = 3;
@@ -45,6 +46,9 @@ SimConfig default_sim_config() {
     config.harness.warmup_ms = 100;
     config.harness.report_wait_timeout_s = 3;
     config.harness.seed_base = 1000;
+
+    config.queues = QueueSizingConfig{ .order_inbox = 8192, .market_data = 8192, .fill = 4096,
+                                        .analytics_trade = 65'536, .analytics_order = 4096 };
 
     config.verbose_reports = false;
 

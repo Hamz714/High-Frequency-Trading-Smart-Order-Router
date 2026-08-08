@@ -15,13 +15,13 @@ struct Point {
 };
 
 TEST(MPSCQueueTest, NewQueue_IsEmpty_PopFails) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     int out;
     EXPECT_FALSE(queue.try_pop(out));
 }
 
 TEST(MPSCQueueTest, PushThenPop_ReturnsSameValue) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     EXPECT_TRUE(queue.push(42));
 
     int out = 0;
@@ -30,7 +30,7 @@ TEST(MPSCQueueTest, PushThenPop_ReturnsSameValue) {
 }
 
 TEST(MPSCQueueTest, PushMultiple_PopsInFifoOrder) {
-    MPSCQueue<int, 8> queue;
+    MPSCQueue<int> queue(8);
     for (int i = 0; i < 5; ++i) {
         EXPECT_TRUE(queue.push(i));
     }
@@ -43,7 +43,7 @@ TEST(MPSCQueueTest, PushMultiple_PopsInFifoOrder) {
 }
 
 TEST(MPSCQueueTest, FullCapacityIsUsable_AllSlotsHoldValues) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     EXPECT_TRUE(queue.push(1));
     EXPECT_TRUE(queue.push(2));
     EXPECT_TRUE(queue.push(3));
@@ -52,8 +52,18 @@ TEST(MPSCQueueTest, FullCapacityIsUsable_AllSlotsHoldValues) {
     EXPECT_FALSE(queue.push(5));
 }
 
+TEST(MPSCQueueTest, NonPowerOfTwoCapacity_RoundsUpToNextPowerOfTwo) {
+    MPSCQueue<int> queue(5);
+    EXPECT_EQ(queue.capacity(), 8u);
+
+    for (int i = 0; i < 8; ++i) {
+        EXPECT_TRUE(queue.push(i));
+    }
+    EXPECT_FALSE(queue.push(8));
+}
+
 TEST(MPSCQueueTest, PopThenPush_ReusesFreedSlot) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     queue.push(1);
     queue.push(2);
     queue.push(3);
@@ -78,14 +88,14 @@ TEST(MPSCQueueTest, PopThenPush_ReusesFreedSlot) {
 }
 
 TEST(MPSCQueueTest, PopOnEmpty_LeavesOutputParameterUnchanged) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     int out = 12345;
     EXPECT_FALSE(queue.try_pop(out));
     EXPECT_EQ(out, 12345);
 }
 
 TEST(MPSCQueueTest, RepeatedFullDrainCycles_WrapAroundStaysConsistent) {
-    MPSCQueue<int, 4> queue;
+    MPSCQueue<int> queue(4);
     int next_pushed = 0;
     int next_expected = 0;
 
@@ -105,7 +115,7 @@ TEST(MPSCQueueTest, RepeatedFullDrainCycles_WrapAroundStaysConsistent) {
 }
 
 TEST(MPSCQueueTest, PreservesFullStructContents) {
-    MPSCQueue<Point, 4> queue;
+    MPSCQueue<Point> queue(4);
     ASSERT_TRUE(queue.push(Point{7, -3}));
 
     Point out{};
@@ -119,7 +129,7 @@ TEST(MPSCQueueTest, ConcurrentMultipleProducersSingleConsumer_AllItemsDeliveredE
     constexpr int kPerProducer = 50'000;
     constexpr int kTotal = kProducers * kPerProducer;
 
-    MPSCQueue<int, 64> queue;
+    MPSCQueue<int> queue(64);
     std::atomic<int> next_value{0};
     std::vector<int> received;
     received.reserve(kTotal);
@@ -160,7 +170,7 @@ TEST(MPSCQueueTest, ConcurrentMultipleProducersSingleConsumer_AllItemsDeliveredE
 }
 
 TEST(MPSCQueueTest, CapacityOne_SecondPushPermanentlyWedgesPop) {
-    MPSCQueue<int, 1> queue;
+    MPSCQueue<int> queue(1);
     EXPECT_TRUE(queue.push(1));
     EXPECT_TRUE(queue.push(2));
 

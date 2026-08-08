@@ -21,7 +21,7 @@ private:
     
     std::unordered_map<OrderID, OrderID> mm_id_to_lob_id;
     
-    std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>> mm_fill_queue;
+    std::unique_ptr<SPSCQueue<FillEvent>> mm_fill_queue;
     
     std::mt19937 rng;
     std::lognormal_distribution<double> size_distribution;
@@ -39,7 +39,8 @@ private:
     void replenish_side(Side side, int64_t fair_value_ticks, double volatility, double half_spread);
 
 public:
-    MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed = std::random_device{}());
+    MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed = std::random_device{}(),
+                size_t fill_queue_capacity = DEFAULT_QUEUE_CAPACITY);
 
     MarketMaker(const MarketMaker&) = delete;
     MarketMaker& operator=(const MarketMaker&) = delete;

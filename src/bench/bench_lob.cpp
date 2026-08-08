@@ -27,6 +27,8 @@ constexpr int MEASURED_OPS = 50'000;
 
 constexpr int DEFAULT_REPEATS = 9;
 
+constexpr size_t BENCH_POOL_CAPACITY = WARMUP_OPS + MEASURED_OPS + 16;
+
 struct BenchResult {
     std::string name;
     int64_t ops = 0;
@@ -90,7 +92,7 @@ std::vector<OrderID> seed_liquidity(LimitOrderBook& book, int count, bool shallo
 }
 
 BenchResult run_insert_benchmark(const std::string& name, bool shallow) {
-    LimitOrderBook book;
+    LimitOrderBook book(BENCH_POOL_CAPACITY);
     seed_touch(book);
     seed_liquidity(book, WARMUP_OPS, shallow);  // warm-up, discarded
 
@@ -113,7 +115,7 @@ BenchResult run_insert_benchmark(const std::string& name, bool shallow) {
 }
 
 BenchResult run_cancel_benchmark(const std::string& name, bool shallow) {
-    LimitOrderBook book;
+    LimitOrderBook book(BENCH_POOL_CAPACITY);
     seed_touch(book);
 
     int total_needed = WARMUP_OPS + MEASURED_OPS;
@@ -144,7 +146,7 @@ BenchResult run_cancel_benchmark(const std::string& name, bool shallow) {
 // best price level, partial-fill the head order) from level-eviction and
 // ladder-window-shift costs.
 BenchResult run_match_benchmark() {
-    LimitOrderBook book;
+    LimitOrderBook book(BENCH_POOL_CAPACITY);
     constexpr int64_t DEEP_RESTING_QTY = 10'000'000;
     constexpr int64_t MATCH_QTY = 10;
 

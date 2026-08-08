@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 #include "common/Types.h"
@@ -22,6 +23,7 @@ struct MarketScenarioConfig {
     double price_dt;
 
     bool simulate_latency;
+    size_t venue_order_pool_capacity;
 };
 
 struct RouterTuningConfig {
@@ -47,6 +49,7 @@ struct SimConfig {
     MarketScenarioConfig market;
     RouterTuningConfig router;
     HarnessConfig harness;
+    QueueSizingConfig queues;
     bool verbose_reports = false;
 };
 

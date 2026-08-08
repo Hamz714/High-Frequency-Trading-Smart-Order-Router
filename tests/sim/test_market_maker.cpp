@@ -25,8 +25,8 @@ MarketMakerConfig make_mm_config(int64_t base_spread = 4, double spread_sensitiv
 
 class MarketMakerTest : public ::testing::Test {
 protected:
-    SPSCQueue<BookDelta, QUEUE_SIZE> md_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE> sor_fill_queue;
+    SPSCQueue<BookDelta> md_queue;
+    SPSCQueue<FillEvent> sor_fill_queue;
     std::unique_ptr<Venue> venue;
     std::unique_ptr<MarketMaker> mm;
 

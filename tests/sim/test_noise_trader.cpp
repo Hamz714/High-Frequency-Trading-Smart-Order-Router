@@ -22,8 +22,8 @@ NoiseTraderConfig make_noise_config(double arrival_rate = 20.0, double size_mu =
 
 class NoiseTraderTest : public ::testing::Test {
 protected:
-    SPSCQueue<BookDelta, QUEUE_SIZE> md_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE> sor_fill_queue;
+    SPSCQueue<BookDelta> md_queue;
+    SPSCQueue<FillEvent> sor_fill_queue;
     std::unique_ptr<Venue> venue;
     std::unique_ptr<NoiseTrader> trader;
 

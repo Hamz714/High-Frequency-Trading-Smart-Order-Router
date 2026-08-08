@@ -51,7 +51,7 @@ struct RoutingOutcome {
 
 class SmartOrderRouterTest : public ::testing::Test {
 protected:
-    SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE> analytics_queue;
+    SPSCQueue<OrderLifecycleEvent> analytics_queue;
     std::vector<std::unique_ptr<Venue>> venue_storage;
     std::unique_ptr<SmartOrderRouter> router;
     OrderID next_order_id = 1;

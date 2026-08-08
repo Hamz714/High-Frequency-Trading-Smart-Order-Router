@@ -2,6 +2,18 @@
 
 #include <bit>
 
+LimitOrderBook::LimitOrderBook(size_t initial_order_pool_capacity)
+    : global_order_pool(initial_order_pool_capacity) {}
+
+void LimitOrderBook::ensure_pool_capacity(int64_t order_index) {
+    size_t required = static_cast<size_t>(order_index) + 1;
+    if (required <= global_order_pool.size()) return;
+
+    size_t new_size = global_order_pool.empty() ? 1 : global_order_pool.size();
+    while (new_size < required) new_size *= 2;
+    global_order_pool.resize(new_size);
+}
+
 PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
     if (side == SELL) {
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
@@ -191,6 +203,7 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
     int64_t bit_index = global_index % 64;
 
     int64_t order_index = order_id & 0xFFFFFFFF;
+    ensure_pool_capacity(order_index);
     global_order_pool[order_index] = order;
 
     if (side == SELL) {
@@ -461,6 +474,8 @@ bool LimitOrderBook::cancel(OrderID id) {
     Side side = (id & (1ULL << 63)) ? SELL : BUY;
     int64_t price = (id >> 32) & 0x7FFFFFFF;
     int64_t order_index = id & 0xFFFFFFFF;
+
+    if (static_cast<size_t>(order_index) >= global_order_pool.size()) return false;
 
     Order& order = global_order_pool[order_index];
 

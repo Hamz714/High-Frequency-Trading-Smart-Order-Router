@@ -9,8 +9,9 @@ SimulationEngine::~SimulationEngine() {
     stop();
 }
 
-void SimulationEngine::add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed) {
-    market_makers.push_back(std::make_unique<MarketMaker>(venue, cfg, seed));
+void SimulationEngine::add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed,
+                                         size_t fill_queue_capacity) {
+    market_makers.push_back(std::make_unique<MarketMaker>(venue, cfg, seed, fill_queue_capacity));
 }
 
 void SimulationEngine::add_noise_trader(Venue* venue, const NoiseTraderConfig& cfg, uint32_t seed) {

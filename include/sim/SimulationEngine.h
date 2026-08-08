@@ -28,7 +28,8 @@ public:
     SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock);
     ~SimulationEngine();
 
-    void add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed);
+    void add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed,
+                          size_t fill_queue_capacity = DEFAULT_QUEUE_CAPACITY);
     void add_noise_trader(Venue* venue, const NoiseTraderConfig& cfg, uint32_t seed);
 
     void start(double dt);

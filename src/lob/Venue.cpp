@@ -1,7 +1,9 @@
 #include "lob/Venue.h"
 
-Venue::Venue(int id, const VenueConfig& cfg, bool simulate_latency):
-    venue_id(id), config(cfg), simulate_latency(simulate_latency), lob() {
+Venue::Venue(int id, const VenueConfig& cfg, bool simulate_latency, size_t order_pool_capacity,
+             size_t inbox_capacity):
+    venue_id(id), config(cfg), simulate_latency(simulate_latency), lob(order_pool_capacity),
+    inbox(inbox_capacity) {
     if (config.type == LIT) {
             lob.on_book_update([this](Side side, int64_t price, int64_t new_qty) {
                 if (this->market_data_queue) {
@@ -21,17 +23,17 @@ Venue::~Venue() {
     stop();
 }
 
-void Venue::set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue, 
-                    SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
+void Venue::set_sor_queues(SPSCQueue<BookDelta>* md_queue,
+                    SPSCQueue<FillEvent>* fill_queue) {
     this->market_data_queue = md_queue;
     this->sor_fill_queue = fill_queue;
 }
 
-void Venue::set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue) {
+void Venue::set_mm_fill_queue(SPSCQueue<FillEvent>* fill_queue) {
     this->mm_fill_queue = fill_queue;
 }
 
-void Venue::set_analytics_queue(MPSCQueue<TradeEvent, QUEUE_SIZE>* trade_queue) {
+void Venue::set_analytics_queue(MPSCQueue<TradeEvent>* trade_queue) {
     this->analytics_trade_queue = trade_queue;
 }
 

@@ -2,7 +2,8 @@
 
 #include "common/CpuRelax.h"
 
-AnalyticsEngine::AnalyticsEngine() {}
+AnalyticsEngine::AnalyticsEngine(size_t trade_inbox_capacity, size_t order_inbox_capacity)
+    : trade_inbox(trade_inbox_capacity), order_inbox(order_inbox_capacity) {}
 
 AnalyticsEngine::~AnalyticsEngine() {
     stop();
@@ -16,11 +17,11 @@ void AnalyticsEngine::on_report(std::function<void(const ExecutionReport&)> cb) 
     report_callback = std::move(cb);
 }
 
-MPSCQueue<TradeEvent, QUEUE_SIZE>* AnalyticsEngine::get_trade_inbox() {
+MPSCQueue<TradeEvent>* AnalyticsEngine::get_trade_inbox() {
     return &trade_inbox;
 }
 
-SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* AnalyticsEngine::get_order_inbox() {
+SPSCQueue<OrderLifecycleEvent>* AnalyticsEngine::get_order_inbox() {
     return &order_inbox;
 }
 

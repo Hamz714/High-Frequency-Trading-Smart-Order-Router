@@ -126,15 +126,18 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
 
     bool simulate_latency = config.market.simulate_latency;
 
-    auto venue_1 = std::make_unique<Venue>(1, lit_cfg_1, simulate_latency);
-    auto venue_2 = std::make_unique<Venue>(2, lit_cfg_2, simulate_latency);
-    auto venue_dark = std::make_unique<Venue>(3, dark_cfg, simulate_latency);
+    size_t pool_capacity = config.market.venue_order_pool_capacity;
+    const QueueSizingConfig& queues = config.queues;
+
+    auto venue_1 = std::make_unique<Venue>(1, lit_cfg_1, simulate_latency, pool_capacity, queues.order_inbox);
+    auto venue_2 = std::make_unique<Venue>(2, lit_cfg_2, simulate_latency, pool_capacity, queues.order_inbox);
+    auto venue_dark = std::make_unique<Venue>(3, dark_cfg, simulate_latency, pool_capacity, queues.order_inbox);
 
     venue_1->set_clock(&clock);
     venue_2->set_clock(&clock);
     venue_dark->set_clock(&clock);
 
-    auto analytics = std::make_unique<AnalyticsEngine>();
+    auto analytics = std::make_unique<AnalyticsEngine>(queues.analytics_trade, queues.analytics_order);
     analytics->set_clock(&clock);
     analytics->on_report([&](const ExecutionReport& report) {
         collector.record_report(trial, use_naive_split, report, fee_schedule);
@@ -151,7 +154,7 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
                               .use_naive_split = use_naive_split,
                               .max_reroute_attempts = config.router.max_reroute_attempts };
 
-    auto router = std::make_unique<SmartOrderRouter>(router_cfg);
+    auto router = std::make_unique<SmartOrderRouter>(router_cfg, queues);
     router->add_venue(venue_1.get());
     router->add_venue(venue_2.get());
     router->add_venue(venue_dark.get());
@@ -163,9 +166,9 @@ TrialOutcome run_trial(int trial, uint32_t trial_seed, bool use_naive_split,
         config.market.price_volatility, config.market.price_dt, trial_seed);
     SimulationEngine sim_engine(std::move(price_process), &clock);
 
-    sim_engine.add_market_maker(venue_1.get(), config.market.mm_lit_venue_1, trial_seed + 101);
-    sim_engine.add_market_maker(venue_2.get(), config.market.mm_lit_venue_2, trial_seed + 102);
-    sim_engine.add_market_maker(venue_dark.get(), config.market.mm_dark_venue, trial_seed + 103);
+    sim_engine.add_market_maker(venue_1.get(), config.market.mm_lit_venue_1, trial_seed + 101, queues.fill);
+    sim_engine.add_market_maker(venue_2.get(), config.market.mm_lit_venue_2, trial_seed + 102, queues.fill);
+    sim_engine.add_market_maker(venue_dark.get(), config.market.mm_dark_venue, trial_seed + 103, queues.fill);
     sim_engine.add_noise_trader(venue_1.get(), config.market.noise_lit_venue_1, trial_seed + 201);
     sim_engine.add_noise_trader(venue_2.get(), config.market.noise_lit_venue_2, trial_seed + 202);
 

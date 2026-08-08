@@ -1,8 +1,11 @@
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <vector>
 #include <unordered_map>
+
+#include "common/Constants.h"
 
 using OrderID = int64_t;
 
@@ -77,6 +80,20 @@ struct SplitResult {
     std::vector<int64_t> allocations;
     double expected_cost;
 };
+
+struct QueueSizingConfig {
+    size_t order_inbox;
+    size_t market_data;
+    size_t fill;
+    size_t analytics_trade;
+    size_t analytics_order;
+};
+
+inline QueueSizingConfig default_queue_sizing() {
+    return QueueSizingConfig{ DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY,
+                              DEFAULT_QUEUE_CAPACITY, DEFAULT_QUEUE_CAPACITY,
+                              DEFAULT_QUEUE_CAPACITY };
+}
 
 struct RouterConfig {
     int64_t lot_size;

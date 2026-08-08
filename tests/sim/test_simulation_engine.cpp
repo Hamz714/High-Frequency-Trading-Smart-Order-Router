@@ -44,14 +44,14 @@ VenueConfig make_venue_config() {
 class SimulationEngineTest : public ::testing::Test {
 protected:
     SimClock clock;
-    std::vector<std::unique_ptr<SPSCQueue<BookDelta, QUEUE_SIZE>>> md_queues;
-    std::vector<std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>>> fill_queues;
+    std::vector<std::unique_ptr<SPSCQueue<BookDelta>>> md_queues;
+    std::vector<std::unique_ptr<SPSCQueue<FillEvent>>> fill_queues;
     std::vector<std::unique_ptr<Venue>> venues;
     std::unique_ptr<SimulationEngine> engine;
 
     Venue* make_venue(VenueID id) {
-        md_queues.push_back(std::make_unique<SPSCQueue<BookDelta, QUEUE_SIZE>>());
-        fill_queues.push_back(std::make_unique<SPSCQueue<FillEvent, QUEUE_SIZE>>());
+        md_queues.push_back(std::make_unique<SPSCQueue<BookDelta>>());
+        fill_queues.push_back(std::make_unique<SPSCQueue<FillEvent>>());
         venues.push_back(std::make_unique<Venue>(id, make_venue_config()));
 
         Venue* venue = venues.back().get();
@@ -77,7 +77,7 @@ protected:
         });
     }
 
-    void drain_n(SPSCQueue<BookDelta, QUEUE_SIZE>& queue, size_t count,
+    void drain_n(SPSCQueue<BookDelta>& queue, size_t count,
                  std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
         auto deadline = std::chrono::steady_clock::now() + timeout;
         size_t seen = 0;
@@ -92,7 +92,7 @@ protected:
         ASSERT_EQ(seen, count);
     }
 
-    std::vector<BookDelta> drain_for(SPSCQueue<BookDelta, QUEUE_SIZE>& queue,
+    std::vector<BookDelta> drain_for(SPSCQueue<BookDelta>& queue,
                                       std::chrono::milliseconds duration) {
         std::vector<BookDelta> deltas;
         auto deadline = std::chrono::steady_clock::now() + duration;

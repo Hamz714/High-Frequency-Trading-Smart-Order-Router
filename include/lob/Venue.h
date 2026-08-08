@@ -44,15 +44,15 @@ class Venue {
     bool simulate_latency;
     LimitOrderBook lob;
 
-    MPSCQueue<OrderRequest, QUEUE_SIZE> inbox;
+    MPSCQueue<OrderRequest> inbox;
     std::thread worker_thread;
     std::atomic<bool> running{false};
 
-    SPSCQueue<BookDelta, QUEUE_SIZE>* market_data_queue = nullptr;
-    SPSCQueue<FillEvent, QUEUE_SIZE>* sor_fill_queue = nullptr;
-    SPSCQueue<FillEvent, QUEUE_SIZE>* mm_fill_queue = nullptr;
+    SPSCQueue<BookDelta>* market_data_queue = nullptr;
+    SPSCQueue<FillEvent>* sor_fill_queue = nullptr;
+    SPSCQueue<FillEvent>* mm_fill_queue = nullptr;
 
-    MPSCQueue<TradeEvent, QUEUE_SIZE>* analytics_trade_queue = nullptr;
+    MPSCQueue<TradeEvent>* analytics_trade_queue = nullptr;
     const SimClock* clock = nullptr;
 
     void worker_loop();
@@ -62,15 +62,17 @@ class Venue {
     int64_t stamp_publication() const;
 
     public:
-        Venue(int id, const VenueConfig& cfg, bool simulate_latency = true);
+        Venue(int id, const VenueConfig& cfg, bool simulate_latency = true,
+              size_t order_pool_capacity = DEFAULT_ORDER_POOL_CAPACITY,
+              size_t inbox_capacity = DEFAULT_QUEUE_CAPACITY);
         ~Venue();
 
-        void set_sor_queues(SPSCQueue<BookDelta, QUEUE_SIZE>* md_queue,
-                    SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
+        void set_sor_queues(SPSCQueue<BookDelta>* md_queue,
+                    SPSCQueue<FillEvent>* fill_queue);
 
-        void set_mm_fill_queue(SPSCQueue<FillEvent, QUEUE_SIZE>* fill_queue);
+        void set_mm_fill_queue(SPSCQueue<FillEvent>* fill_queue);
 
-        void set_analytics_queue(MPSCQueue<TradeEvent, QUEUE_SIZE>* trade_queue);
+        void set_analytics_queue(MPSCQueue<TradeEvent>* trade_queue);
 
         void set_clock(const SimClock* c);
 

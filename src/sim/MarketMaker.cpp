@@ -1,8 +1,9 @@
 #include "sim/MarketMaker.h"
 
-MarketMaker::MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed):
+MarketMaker::MarketMaker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed,
+                          size_t fill_queue_capacity):
     target_venue(venue), config(cfg),
-    mm_fill_queue(std::make_unique<SPSCQueue<FillEvent, QUEUE_SIZE>>()), rng(seed) {
+    mm_fill_queue(std::make_unique<SPSCQueue<FillEvent>>(fill_queue_capacity)), rng(seed) {
 
     double m = static_cast<double>(config.quantity_mean);
     double v = config.quantity_variance;

@@ -32,7 +32,9 @@ class LimitOrderBook {
 
     int64_t next_order_index = 1;
 
-    std::vector<Order> global_order_pool{10'000'000};
+    std::vector<Order> global_order_pool;
+
+    void ensure_pool_capacity(int64_t order_index);
 
     std::function<void(Side, int64_t, int64_t)> update_callback;
 
@@ -57,6 +59,8 @@ class LimitOrderBook {
     void publish_book_update(Side side, int64_t price, int64_t new_qty);
 
     public:
+        explicit LimitOrderBook(size_t initial_order_pool_capacity = DEFAULT_ORDER_POOL_CAPACITY);
+
         std::vector<Fill> submit(Side side, OrderType type, int64_t price, int64_t quantity);
 
         bool cancel(OrderID id);

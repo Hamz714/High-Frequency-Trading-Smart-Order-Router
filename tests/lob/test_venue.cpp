@@ -54,10 +54,10 @@ OrderRequest make_cancel(OrderID lob_order_id, SenderType sender) {
 
 class VenueTest : public ::testing::Test {
 protected:
-    SPSCQueue<BookDelta, QUEUE_SIZE> market_data_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE> sor_fill_queue;
-    SPSCQueue<FillEvent, QUEUE_SIZE> mm_fill_queue;
-    MPSCQueue<TradeEvent, QUEUE_SIZE> analytics_queue;
+    SPSCQueue<BookDelta> market_data_queue;
+    SPSCQueue<FillEvent> sor_fill_queue;
+    SPSCQueue<FillEvent> mm_fill_queue;
+    MPSCQueue<TradeEvent> analytics_queue;
 
     std::unique_ptr<Venue> venue;
 

@@ -33,15 +33,17 @@ private:
     std::unordered_map<OrderID, ParentOrder> active_parent_orders;
     std::unordered_map<OrderID, OrderID> child_to_parent;
 
-    MPSCQueue<OrderRequest, QUEUE_SIZE> client_inbox;
+    QueueSizingConfig queue_sizing;
 
-    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<BookDelta, QUEUE_SIZE>>> venue_md_queues;
-    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<FillEvent, QUEUE_SIZE>>> venue_fill_queues;
+    MPSCQueue<OrderRequest> client_inbox;
+
+    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<BookDelta>>> venue_md_queues;
+    std::unordered_map<VenueID, std::unique_ptr<SPSCQueue<FillEvent>>> venue_fill_queues;
 
     std::vector<VenueState> venue_states;
 
     const SimClock* clock = nullptr;
-    SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* analytics_queue = nullptr;
+    SPSCQueue<OrderLifecycleEvent>* analytics_queue = nullptr;
 
     std::atomic<bool> running;
     std::thread md_thread;
@@ -60,13 +62,14 @@ private:
     double compute_consolidated_mid() const;
 
 public:
-    SmartOrderRouter(const RouterConfig& cfg);
+    explicit SmartOrderRouter(const RouterConfig& cfg,
+                              const QueueSizingConfig& queues = default_queue_sizing());
     ~SmartOrderRouter();
 
     void add_venue(Venue* venue);
 
     void set_clock(const SimClock* c);
-    void set_analytics_queue(SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* queue);
+    void set_analytics_queue(SPSCQueue<OrderLifecycleEvent>* queue);
 
     void start();
     void stop();

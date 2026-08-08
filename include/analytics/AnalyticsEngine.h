@@ -14,8 +14,8 @@
 
 class AnalyticsEngine {
 private:
-    MPSCQueue<TradeEvent, QUEUE_SIZE> trade_inbox;
-    SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE> order_inbox;
+    MPSCQueue<TradeEvent> trade_inbox;
+    SPSCQueue<OrderLifecycleEvent> order_inbox;
 
     std::deque<TradeEvent> trade_buffer;
     std::unordered_map<OrderID, PendingOrder> pending_orders;
@@ -33,15 +33,16 @@ private:
     void trim_trade_buffer();
 
 public:
-    AnalyticsEngine();
+    explicit AnalyticsEngine(size_t trade_inbox_capacity = DEFAULT_QUEUE_CAPACITY,
+                             size_t order_inbox_capacity = DEFAULT_QUEUE_CAPACITY);
     ~AnalyticsEngine();
 
     void set_clock(const SimClock* c);
 
     void on_report(std::function<void(const ExecutionReport&)> cb);
 
-    MPSCQueue<TradeEvent, QUEUE_SIZE>* get_trade_inbox();
-    SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* get_order_inbox();
+    MPSCQueue<TradeEvent>* get_trade_inbox();
+    SPSCQueue<OrderLifecycleEvent>* get_order_inbox();
 
     uint64_t get_dropped_total() const { return trade_inbox.dropped() + order_inbox.dropped(); }
 

@@ -13,13 +13,13 @@ struct Point {
 };
 
 TEST(SPSCQueueTest, NewQueue_IsEmpty_PopFails) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     int out;
     EXPECT_FALSE(queue.try_pop(out));
 }
 
 TEST(SPSCQueueTest, PushThenPop_ReturnsSameValue) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     EXPECT_TRUE(queue.push(42));
 
     int out = 0;
@@ -28,7 +28,7 @@ TEST(SPSCQueueTest, PushThenPop_ReturnsSameValue) {
 }
 
 TEST(SPSCQueueTest, PushMultiple_PopsInFifoOrder) {
-    SPSCQueue<int, 8> queue;
+    SPSCQueue<int> queue(8);
     for (int i = 0; i < 5; ++i) {
         EXPECT_TRUE(queue.push(i));
     }
@@ -40,16 +40,26 @@ TEST(SPSCQueueTest, PushMultiple_PopsInFifoOrder) {
     }
 }
 
-TEST(SPSCQueueTest, UsableCapacity_IsOneLessThanTemplateCapacity) {
-    SPSCQueue<int, 4> queue;
+TEST(SPSCQueueTest, UsableCapacity_IsOneLessThanRequestedCapacity) {
+    SPSCQueue<int> queue(4);
     EXPECT_TRUE(queue.push(1));
     EXPECT_TRUE(queue.push(2));
     EXPECT_TRUE(queue.push(3));
     EXPECT_FALSE(queue.push(4));
 }
 
+TEST(SPSCQueueTest, NonPowerOfTwoCapacity_RoundsUpToNextPowerOfTwo) {
+    SPSCQueue<int> queue(5);
+    EXPECT_EQ(queue.capacity(), 8u);
+
+    for (int i = 0; i < 7; ++i) {
+        EXPECT_TRUE(queue.push(i));
+    }
+    EXPECT_FALSE(queue.push(7));
+}
+
 TEST(SPSCQueueTest, Push_FailsWhenFull_WithoutOverwritingOldestEntry) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     queue.push(1);
     queue.push(2);
     queue.push(3);
@@ -62,14 +72,14 @@ TEST(SPSCQueueTest, Push_FailsWhenFull_WithoutOverwritingOldestEntry) {
 }
 
 TEST(SPSCQueueTest, PopOnEmpty_LeavesOutputParameterUnchanged) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     int out = 12345;
     EXPECT_FALSE(queue.try_pop(out));
     EXPECT_EQ(out, 12345);
 }
 
 TEST(SPSCQueueTest, FullThenDrain_FreesSlotsForMorePushes) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     queue.push(1);
     queue.push(2);
     queue.push(3);
@@ -91,7 +101,7 @@ TEST(SPSCQueueTest, FullThenDrain_FreesSlotsForMorePushes) {
 }
 
 TEST(SPSCQueueTest, RepeatedPushPopCycles_WrapAroundStaysConsistent) {
-    SPSCQueue<int, 4> queue;
+    SPSCQueue<int> queue(4);
     int next_pushed = 0;
     int next_expected = 0;
 
@@ -108,7 +118,7 @@ TEST(SPSCQueueTest, RepeatedPushPopCycles_WrapAroundStaysConsistent) {
 }
 
 TEST(SPSCQueueTest, CapacityOne_QueueCanNeverHoldAnItem) {
-    SPSCQueue<int, 1> queue;
+    SPSCQueue<int> queue(1);
     EXPECT_FALSE(queue.push(1));
 
     int out;
@@ -116,7 +126,7 @@ TEST(SPSCQueueTest, CapacityOne_QueueCanNeverHoldAnItem) {
 }
 
 TEST(SPSCQueueTest, PreservesFullStructContents) {
-    SPSCQueue<Point, 4> queue;
+    SPSCQueue<Point> queue(4);
     ASSERT_TRUE(queue.push(Point{7, -3}));
 
     Point out{};
@@ -127,7 +137,7 @@ TEST(SPSCQueueTest, PreservesFullStructContents) {
 
 TEST(SPSCQueueTest, ConcurrentSingleProducerSingleConsumer_AllItemsDeliveredInOrder) {
     constexpr int kCount = 200'000;
-    SPSCQueue<int, 64> queue;
+    SPSCQueue<int> queue(64);
 
     std::vector<int> received;
     received.reserve(kCount);

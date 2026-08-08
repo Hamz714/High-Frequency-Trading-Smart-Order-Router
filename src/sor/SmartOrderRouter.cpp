@@ -1,8 +1,9 @@
 #include "sor/SmartOrderRouter.h"
 #include <algorithm>
 
-SmartOrderRouter::SmartOrderRouter(const RouterConfig& cfg):
-    config(cfg), dp_engine(cfg), running(false) {}
+SmartOrderRouter::SmartOrderRouter(const RouterConfig& cfg, const QueueSizingConfig& queues):
+    config(cfg), dp_engine(cfg), queue_sizing(queues), client_inbox(queues.order_inbox),
+    running(false) {}
 
 SmartOrderRouter::~SmartOrderRouter() {
     stop();
@@ -13,10 +14,10 @@ void SmartOrderRouter::add_venue(Venue* venue) {
     
     venues[id] = venue;
 
-    venue_md_queues[id] = std::make_unique<SPSCQueue<BookDelta, QUEUE_SIZE>>();
-    venue_fill_queues[id] = std::make_unique<SPSCQueue<FillEvent, QUEUE_SIZE>>();
+    venue_md_queues[id] = std::make_unique<SPSCQueue<BookDelta>>(queue_sizing.market_data);
+    venue_fill_queues[id] = std::make_unique<SPSCQueue<FillEvent>>(queue_sizing.fill);
 
-    mirror_books[id] = LimitOrderBook();
+    mirror_books.try_emplace(id);
 
     venue->set_sor_queues(venue_md_queues[id].get(), venue_fill_queues[id].get());
 }
@@ -25,7 +26,7 @@ void SmartOrderRouter::set_clock(const SimClock* c) {
     this->clock = c;
 }
 
-void SmartOrderRouter::set_analytics_queue(SPSCQueue<OrderLifecycleEvent, QUEUE_SIZE>* queue) {
+void SmartOrderRouter::set_analytics_queue(SPSCQueue<OrderLifecycleEvent>* queue) {
     this->analytics_queue = queue;
 }
 
