@@ -11,8 +11,11 @@
 #include <numeric>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#include "common/CycleClock.h"
+#include "common/HostInfo.h"
 #include "common/Types.h"
 #include "lob/LimitOrderBook.h"
 
@@ -45,6 +48,7 @@ struct AggregatedResult {
     int runs = 0;
     double median_ops_per_sec = 0.0, min_ops_per_sec = 0.0, max_ops_per_sec = 0.0;
     double p50_ns = 0.0, p95_ns = 0.0, p99_ns = 0.0, p999_ns = 0.0, max_ns = 0.0;
+    double adj_p50_ns = 0.0, adj_p95_ns = 0.0, adj_p99_ns = 0.0, adj_p999_ns = 0.0, adj_max_ns = 0.0;
 };
 
 double percentile(std::vector<double> values, double p) {
@@ -65,6 +69,10 @@ BenchResult summarize(const std::string& name, const std::vector<double>& latenc
     r.p999_ns = percentile(latencies_ns, 0.999);
     r.max_ns = latencies_ns.empty() ? 0.0 : *std::max_element(latencies_ns.begin(), latencies_ns.end());
     return r;
+}
+
+double elapsed_seconds(uint64_t start_ticks) {
+    return cycles_to_ns(cycle_now() - start_ticks) / 1e9;
 }
 
 void seed_touch(LimitOrderBook& book) {
@@ -91,30 +99,56 @@ std::vector<OrderID> seed_liquidity(LimitOrderBook& book, int count, bool shallo
     return ids;
 }
 
-BenchResult run_insert_benchmark(const std::string& name, bool shallow) {
+// Two back-to-back timer reads with no work between them: the additive cost the
+// instrumented loops pay per sample, subtracted from every reported percentile.
+BenchResult run_timer_floor_benchmark() {
+    std::vector<double> latencies_ns;
+    latencies_ns.reserve(MEASURED_OPS);
+
+    uint64_t bench_start = cycle_now();
+    for (int i = 0; i < MEASURED_OPS; ++i) {
+        uint64_t t0 = cycle_now();
+        uint64_t t1 = cycle_now();
+        latencies_ns.push_back(cycles_to_ns(t1 - t0));
+    }
+    double total_seconds = elapsed_seconds(bench_start);
+
+    return summarize("timer noise floor (no work between reads)", latencies_ns, total_seconds);
+}
+
+BenchResult run_insert_benchmark(const std::string& name, bool shallow, bool instrument) {
     LimitOrderBook book(BENCH_POOL_CAPACITY);
     seed_touch(book);
     seed_liquidity(book, WARMUP_OPS, shallow);  // warm-up, discarded
 
     std::vector<double> latencies_ns;
-    latencies_ns.reserve(MEASURED_OPS);
+    if (instrument) latencies_ns.reserve(MEASURED_OPS);
 
-    auto bench_start = std::chrono::steady_clock::now();
-    for (int i = 0; i < MEASURED_OPS; ++i) {
-        int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
+    uint64_t bench_start = cycle_now();
+    if (instrument) {
+        for (int i = 0; i < MEASURED_OPS; ++i) {
+            int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
 
-        auto t0 = std::chrono::steady_clock::now();
-        book.submit(BUY, LIMIT, price, RESTING_QTY);
-        auto t1 = std::chrono::steady_clock::now();
+            uint64_t t0 = cycle_now();
+            book.submit(BUY, LIMIT, price, RESTING_QTY);
+            uint64_t t1 = cycle_now();
 
-        latencies_ns.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count());
+            latencies_ns.push_back(cycles_to_ns(t1 - t0));
+        }
+    } else {
+        for (int i = 0; i < MEASURED_OPS; ++i) {
+            int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
+            book.submit(BUY, LIMIT, price, RESTING_QTY);
+        }
     }
-    double total_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - bench_start).count();
+    double total_seconds = elapsed_seconds(bench_start);
 
-    return summarize(name, latencies_ns, total_seconds);
+    BenchResult r = summarize(name, latencies_ns, total_seconds);
+    if (!instrument) r.ops = MEASURED_OPS;
+    return r;
 }
 
-BenchResult run_cancel_benchmark(const std::string& name, bool shallow) {
+BenchResult run_cancel_benchmark(const std::string& name, bool shallow, bool instrument) {
     LimitOrderBook book(BENCH_POOL_CAPACITY);
     seed_touch(book);
 
@@ -126,26 +160,34 @@ BenchResult run_cancel_benchmark(const std::string& name, bool shallow) {
     }
 
     std::vector<double> latencies_ns;
-    latencies_ns.reserve(MEASURED_OPS);
+    if (instrument) latencies_ns.reserve(MEASURED_OPS);
 
-    auto bench_start = std::chrono::steady_clock::now();
-    for (int i = WARMUP_OPS; i < total_needed; ++i) {
-        auto t0 = std::chrono::steady_clock::now();
-        book.cancel(ids[i]);
-        auto t1 = std::chrono::steady_clock::now();
+    uint64_t bench_start = cycle_now();
+    if (instrument) {
+        for (int i = WARMUP_OPS; i < total_needed; ++i) {
+            uint64_t t0 = cycle_now();
+            book.cancel(ids[i]);
+            uint64_t t1 = cycle_now();
 
-        latencies_ns.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count());
+            latencies_ns.push_back(cycles_to_ns(t1 - t0));
+        }
+    } else {
+        for (int i = WARMUP_OPS; i < total_needed; ++i) {
+            book.cancel(ids[i]);
+        }
     }
-    double total_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - bench_start).count();
+    double total_seconds = elapsed_seconds(bench_start);
 
-    return summarize(name, latencies_ns, total_seconds);
+    BenchResult r = summarize(name, latencies_ns, total_seconds);
+    if (!instrument) r.ops = MEASURED_OPS;
+    return r;
 }
 
 // Repeatedly crosses the spread with a small marketable IOC against a single
 // deep resting order at the touch - isolates the matching hot path (walk to
 // best price level, partial-fill the head order) from level-eviction and
 // ladder-window-shift costs.
-BenchResult run_match_benchmark() {
+BenchResult run_match_benchmark(const std::string& name, bool /*shallow*/, bool instrument) {
     LimitOrderBook book(BENCH_POOL_CAPACITY);
     constexpr int64_t DEEP_RESTING_QTY = 10'000'000;
     constexpr int64_t MATCH_QTY = 10;
@@ -157,19 +199,39 @@ BenchResult run_match_benchmark() {
     }
 
     std::vector<double> latencies_ns;
-    latencies_ns.reserve(MEASURED_OPS);
+    if (instrument) latencies_ns.reserve(MEASURED_OPS);
 
-    auto bench_start = std::chrono::steady_clock::now();
-    for (int i = 0; i < MEASURED_OPS; ++i) {
-        auto t0 = std::chrono::steady_clock::now();
-        book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);
-        auto t1 = std::chrono::steady_clock::now();
+    uint64_t bench_start = cycle_now();
+    if (instrument) {
+        for (int i = 0; i < MEASURED_OPS; ++i) {
+            uint64_t t0 = cycle_now();
+            book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);
+            uint64_t t1 = cycle_now();
 
-        latencies_ns.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count());
+            latencies_ns.push_back(cycles_to_ns(t1 - t0));
+        }
+    } else {
+        for (int i = 0; i < MEASURED_OPS; ++i) {
+            book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);
+        }
     }
-    double total_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - bench_start).count();
+    double total_seconds = elapsed_seconds(bench_start);
 
-    return summarize("match (crossing, single-level partial fill)", latencies_ns, total_seconds);
+    BenchResult r = summarize(name, latencies_ns, total_seconds);
+    if (!instrument) r.ops = MEASURED_OPS;
+    return r;
+}
+
+using ScenarioFn = BenchResult (*)(const std::string&, bool, bool);
+
+// Percentiles come from the instrumented pass; throughput comes from a second,
+// uninstrumented pass so the per-op timer reads stay out of the denominator.
+BenchResult run_scenario(ScenarioFn fn, const std::string& name, bool shallow) {
+    BenchResult timed = fn(name, shallow, true);
+    BenchResult untimed = fn(name, shallow, false);
+    timed.total_seconds = untimed.total_seconds;
+    timed.ops = untimed.ops;
+    return timed;
 }
 
 double median_of(std::vector<double> values) {
@@ -180,7 +242,7 @@ double median_of(std::vector<double> values) {
     return (values[mid - 1] + values[mid]) / 2.0;
 }
 
-AggregatedResult aggregate(const std::vector<BenchResult>& runs) {
+AggregatedResult aggregate(const std::vector<BenchResult>& runs, double floor_ns) {
     AggregatedResult agg;
     if (runs.empty()) return agg;
 
@@ -209,15 +271,73 @@ AggregatedResult aggregate(const std::vector<BenchResult>& runs) {
     agg.p999_ns = median_of(p999s);
     agg.max_ns = *std::max_element(maxes.begin(), maxes.end());
 
+    auto adjust = [floor_ns](double raw) { return std::max(0.0, raw - floor_ns); };
+    agg.adj_p50_ns = adjust(agg.p50_ns);
+    agg.adj_p95_ns = adjust(agg.p95_ns);
+    agg.adj_p99_ns = adjust(agg.p99_ns);
+    agg.adj_p999_ns = adjust(agg.p999_ns);
+    agg.adj_max_ns = adjust(agg.max_ns);
+
     return agg;
 }
 
-void print_console_table(const std::vector<AggregatedResult>& results, int repeats) {
+void print_host_banner(const HostInfo& host) {
+    std::cout << "\n=== Measurement environment ===\n\n";
+    std::cout << "  os                    " << host.os << "\n";
+    std::cout << "  cpu                   " << host.cpu_brand << "\n";
+    std::cout << "  logical cpus          " << host.logical_cpus << "\n";
+    std::cout << "  pinned to cpu         "
+              << (host.pinned_cpu >= 0 ? std::to_string(host.pinned_cpu)
+                                       : std::string("not pinned")) << "\n";
+    std::cout << "  timer backend         " << host.timer_backend;
+    if (host.timer_backend == "rdtsc") {
+        std::cout << " (" << std::fixed << std::setprecision(3) << host.cycles_per_ns << " GHz, "
+                  << (host.tsc_invariant ? "invariant" : "NOT invariant") << ")";
+    }
+    std::cout << "\n";
+    std::cout << "  min timer delta       " << std::fixed << std::setprecision(2)
+              << host.timer_resolution_ns << " ns\n";
+    std::cout << "  steady_clock delta    " << std::fixed << std::setprecision(2)
+              << host.steady_clock_resolution_ns << " ns\n";
+    std::cout << "  scaling governor      " << host.scaling_governor << "\n";
+    std::cout << "  turbo                 " << host.turbo << "\n";
+    std::cout << "  hypervisor            " << (host.hypervisor ? "yes (virtualised host)" : "no") << "\n";
+
+    if (!host.tsc_invariant && host.timer_backend == "rdtsc") {
+        std::cout << "\n  WARNING: TSC is not invariant on this host - cycle counts may drift with\n"
+                     "  frequency or across cores. Treat latencies as indicative only.\n";
+    }
+    if (host.pinned_cpu < 0) {
+        std::cout << "\n  WARNING: thread is not pinned - migrations between cores will show up in\n"
+                     "  the tail percentiles.\n";
+    }
+    if (host.hypervisor) {
+        std::cout << "\n  NOTE: running under a hypervisor (VM, WSL2, or cloud instance). Resolution\n"
+                     "  is real, but core isolation and frequency policy are not under your control.\n";
+    }
+}
+
+void print_floor_summary(const AggregatedResult& floor) {
+    std::cout << "\n=== Timer noise floor ===\n\n";
+    std::cout << "  Two back-to-back timer reads, no work between them, "
+              << MEASURED_OPS << " samples x " << floor.runs << " runs.\n";
+    std::cout << "  p50 " << std::fixed << std::setprecision(2) << floor.p50_ns << " ns"
+              << "   p95 " << floor.p95_ns << " ns"
+              << "   p99 " << floor.p99_ns << " ns"
+              << "   p999 " << floor.p999_ns << " ns"
+              << "   max " << floor.max_ns << " ns\n";
+    std::cout << "  The p50 (" << floor.p50_ns
+              << " ns) is subtracted from every percentile in the table below.\n";
+}
+
+void print_console_table(const std::vector<AggregatedResult>& results, int repeats, double floor_ns) {
     std::cout << "\n=== LimitOrderBook Microbenchmark (single-threaded, "
               << MEASURED_OPS << " measured ops/scenario x " << repeats << " runs) ===\n\n";
-    std::cout << "Throughput is the median across runs, with the observed range in brackets.\n"
-              << "Percentiles are medians across runs; on a ~100ns clock they are quantised\n"
-              << "and should be read as bounds, not exact latencies.\n\n";
+    std::cout << "Throughput is the median across runs of an uninstrumented pass, with the\n"
+              << "observed range in brackets - no per-op timer reads are inside that loop.\n"
+              << "Percentiles are medians across runs of a separate instrumented pass, with the\n"
+              << "measured " << std::fixed << std::setprecision(2) << floor_ns
+              << " ns timer floor subtracted. Raw (unsubtracted) values are in the CSV.\n\n";
 
     std::cout << std::left << std::setw(46) << "Scenario"
               << std::right << std::setw(14) << "ops/sec"
@@ -237,11 +357,12 @@ void print_console_table(const std::vector<AggregatedResult>& results, int repea
         std::cout << std::left << std::setw(46) << r.name
                   << std::right << std::setw(14) << std::fixed << std::setprecision(0) << r.median_ops_per_sec
                   << std::setw(26) << range.str()
-                  << std::setw(10) << r.p50_ns
-                  << std::setw(10) << r.p95_ns
-                  << std::setw(10) << r.p99_ns
-                  << std::setw(11) << r.p999_ns
-                  << std::setw(11) << r.max_ns << "\n";
+                  << std::fixed << std::setprecision(1)
+                  << std::setw(10) << r.adj_p50_ns
+                  << std::setw(10) << r.adj_p95_ns
+                  << std::setw(10) << r.adj_p99_ns
+                  << std::setw(11) << r.adj_p999_ns
+                  << std::setw(11) << r.adj_max_ns << "\n";
     }
     std::cout << "\n";
 }
@@ -276,47 +397,84 @@ std::string timestamp_string() {
     return oss.str();
 }
 
-void export_csv(const std::vector<AggregatedResult>& results, const std::string& path) {
+void export_csv(const std::vector<AggregatedResult>& results, const AggregatedResult& floor,
+                const HostInfo& host, const std::string& path) {
     std::ofstream out(path);
+    out << "# " << describe_host(host) << "\n";
+    out << "# measured_ops_per_run=" << MEASURED_OPS << "; runs=" << floor.runs
+        << "; timer_floor_p50_ns=" << floor.p50_ns << "\n";
+    out << "# throughput measured on an uninstrumented pass; adj_* percentiles have the"
+           " timer floor p50 subtracted\n";
+
     out << "scenario,runs,median_ops_per_sec,min_ops_per_sec,max_ops_per_sec,"
-           "p50_ns,p95_ns,p99_ns,p999_ns,max_ns\n";
-    for (const auto& r : results) {
+           "p50_ns,p95_ns,p99_ns,p999_ns,max_ns,"
+           "adj_p50_ns,adj_p95_ns,adj_p99_ns,adj_p999_ns,adj_max_ns\n";
+
+    auto write_row = [&out](const AggregatedResult& r) {
         out << '"' << r.name << '"' << "," << r.runs << "," << r.median_ops_per_sec << ","
             << r.min_ops_per_sec << "," << r.max_ops_per_sec << ","
-            << r.p50_ns << "," << r.p95_ns << "," << r.p99_ns << "," << r.p999_ns << "," << r.max_ns << "\n";
-    }
+            << r.p50_ns << "," << r.p95_ns << "," << r.p99_ns << "," << r.p999_ns << "," << r.max_ns << ","
+            << r.adj_p50_ns << "," << r.adj_p95_ns << "," << r.adj_p99_ns << ","
+            << r.adj_p999_ns << "," << r.adj_max_ns << "\n";
+    };
+
+    write_row(floor);
+    for (const auto& r : results) write_row(r);
 }
 
 }  // namespace
 
 int main(int argc, char** argv) {
     int repeats = DEFAULT_REPEATS;
+    int requested_cpu = -2;
+
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--repeat") == 0 && i + 1 < argc) {
             repeats = std::max(1, std::atoi(argv[++i]));
+        } else if (std::strcmp(argv[i], "--pin") == 0 && i + 1 < argc) {
+            requested_cpu = std::atoi(argv[++i]);
+        } else if (std::strcmp(argv[i], "--no-pin") == 0) {
+            requested_cpu = -1;
         }
     }
 
-    std::cout << "[ BENCH_LOB ] running LimitOrderBook microbenchmark (" << repeats << " runs)...\n";
+    unsigned available = std::max(1u, std::thread::hardware_concurrency());
+    if (requested_cpu == -2) requested_cpu = static_cast<int>(available) - 1;
 
-    std::vector<BenchResult> insert_shallow, insert_deep, cancel_shallow, cancel_deep, match;
-
-    for (int run = 0; run < repeats; ++run) {
-        insert_shallow.push_back(run_insert_benchmark("insert (ladder region)", /*shallow=*/true));
-        insert_deep.push_back(run_insert_benchmark("insert (overflow map region)", /*shallow=*/false));
-        cancel_shallow.push_back(run_cancel_benchmark("cancel (ladder region)", /*shallow=*/true));
-        cancel_deep.push_back(run_cancel_benchmark("cancel (overflow map region)", /*shallow=*/false));
-        match.push_back(run_match_benchmark());
+    HostInfo host = collect_host_info();
+    if (requested_cpu >= 0 && pin_current_thread(requested_cpu)) {
+        host.pinned_cpu = requested_cpu;
     }
 
-    AggregatedResult agg_insert_shallow = aggregate(insert_shallow);
-    AggregatedResult agg_insert_deep = aggregate(insert_deep);
-    AggregatedResult agg_cancel_shallow = aggregate(cancel_shallow);
-    AggregatedResult agg_cancel_deep = aggregate(cancel_deep);
+    print_host_banner(host);
+
+    std::cout << "\n[ BENCH_LOB ] running LimitOrderBook microbenchmark (" << repeats << " runs)...\n";
+
+    std::vector<BenchResult> floor_runs, insert_shallow, insert_deep, cancel_shallow, cancel_deep, match;
+
+    for (int run = 0; run < repeats; ++run) {
+        floor_runs.push_back(run_timer_floor_benchmark());
+        insert_shallow.push_back(run_scenario(run_insert_benchmark, "insert (ladder region)", true));
+        insert_deep.push_back(run_scenario(run_insert_benchmark, "insert (overflow map region)", false));
+        cancel_shallow.push_back(run_scenario(run_cancel_benchmark, "cancel (ladder region)", true));
+        cancel_deep.push_back(run_scenario(run_cancel_benchmark, "cancel (overflow map region)", false));
+        match.push_back(run_scenario(run_match_benchmark, "match (crossing, single-level partial fill)", true));
+    }
+
+    AggregatedResult agg_floor = aggregate(floor_runs, 0.0);
+    double floor_ns = agg_floor.p50_ns;
+
+    AggregatedResult agg_insert_shallow = aggregate(insert_shallow, floor_ns);
+    AggregatedResult agg_insert_deep = aggregate(insert_deep, floor_ns);
+    AggregatedResult agg_cancel_shallow = aggregate(cancel_shallow, floor_ns);
+    AggregatedResult agg_cancel_deep = aggregate(cancel_deep, floor_ns);
 
     std::vector<AggregatedResult> results{ agg_insert_shallow, agg_insert_deep,
-                                            agg_cancel_shallow, agg_cancel_deep, aggregate(match) };
-    print_console_table(results, repeats);
+                                            agg_cancel_shallow, agg_cancel_deep,
+                                            aggregate(match, floor_ns) };
+
+    print_floor_summary(agg_floor);
+    print_console_table(results, repeats, floor_ns);
 
     std::cout << "Ladder vs. overflow-map design validation:\n";
     print_regime_comparison(agg_insert_shallow, agg_insert_deep, "insert");
@@ -325,7 +483,7 @@ int main(int argc, char** argv) {
 
     std::filesystem::create_directories("results");
     std::string path = "results/lob_benchmark_" + timestamp_string() + ".csv";
-    export_csv(results, path);
+    export_csv(results, agg_floor, host, path);
     std::cout << "[ BENCH_LOB ] wrote results to " << path << "\n";
 
     return 0;

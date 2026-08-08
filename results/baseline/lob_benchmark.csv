@@ -1,6 +1,0 @@
-scenario,runs,median_ops_per_sec,min_ops_per_sec,max_ops_per_sec,p50_ns,p95_ns,p99_ns,p999_ns,max_ns
-"insert (ladder region)",9,9.09207e+06,4.83587e+06,1.12347e+07,100,100,200,800,1.0408e+06
-"insert (overflow map region)",9,6.94435e+06,3.81513e+06,7.58196e+06,100,200,200,1200,681600
-"cancel (ladder region)",9,1.87147e+07,1.40726e+07,2.06211e+07,0,100,100,100,17800
-"cancel (overflow map region)",9,1.26234e+07,1.13091e+07,1.35237e+07,100,100,100,800,244300
-"match (crossing, single-level partial fill)",9,1.01014e+07,7.8646e+06,1.09854e+07,100,100,100,800,25600

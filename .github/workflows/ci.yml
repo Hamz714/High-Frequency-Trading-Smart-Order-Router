@@ -74,3 +74,6 @@ jobs:
 
       - name: Integrated multi-threaded run
         run: ./build/high_frequency --trials 3
+
+      - name: Order book microbenchmark
+        run: ./build/bench_lob --repeat 1

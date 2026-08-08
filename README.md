@@ -86,26 +86,69 @@ it bite is not yet.
 ### Order book microbenchmark
 
 Single-threaded, 50k measured ops per scenario, no routing or threading involved.
-Throughput is the median of 9 runs, with the observed range — a single pass on a
-laptop is noisy enough that the ladder/overflow ratio can invert, so the tool
+Each scenario runs twice per repeat: an **uninstrumented** pass that produces the
+throughput figure, and an **instrumented** pass that produces the percentiles. The
+two are separated so per-op timer reads never land inside the throughput
+denominator. Both are medians of 9 runs, with the observed range — a single pass on
+a laptop is noisy enough that the ladder/overflow ratio can invert, so the tool
 repeats and aggregates by default.
+
+Timing uses a calibrated `rdtsc` counter fenced with `lfence` on x86-64, falling
+back to `steady_clock` elsewhere. The thread is pinned to one core, and the harness
+measures its own **noise floor** — two back-to-back timer reads with no work between
+them — then subtracts that floor's p50 from every reported percentile. The binary
+prints the host, CPU, timer backend, TSC frequency and invariance, governor, turbo
+state, and hypervisor presence before it runs, and repeats them in the CSV header.
 
 | Scenario | ops/sec (median) | range | p50 | p95 | p99 |
 |---|---:|---:|---:|---:|---:|
-| insert (ladder region) | **9.09 M** | 4.84 – 11.23 M | 100 ns | 100 ns | 200 ns |
-| insert (overflow map region) | 6.94 M | 3.82 – 7.58 M | 100 ns | 200 ns | 200 ns |
-| cancel (ladder region) | **18.71 M** | 14.07 – 20.62 M | 0 ns | 100 ns | 100 ns |
-| cancel (overflow map region) | 12.62 M | 11.31 – 13.52 M | 100 ns | 100 ns | 100 ns |
-| match (crossing, partial fill) | 10.10 M | 7.86 – 10.99 M | 100 ns | 100 ns | 100 ns |
+| insert (ladder region) | **31.43 M** | 22.55 – 44.25 M | 35 ns | 41 ns | 44 ns |
+| insert (overflow map region) | 10.75 M | 6.36 – 11.54 M | 99 ns | 136 ns | 156 ns |
+| cancel (ladder region) | **168.37 M** | 78.66 – 260.27 M | 9 ns | 12 ns | 14 ns |
+| cancel (overflow map region) | 27.28 M | 25.36 – 29.25 M | 39 ns | 59 ns | 73 ns |
+| match (crossing, partial fill) | 36.30 M | 26.42 – 56.72 M | 29 ns | 34 ns | 35 ns |
 
-Measured on an i7-1165G7 (4C/8T), Windows 11, GCC 14.2 `-O3`.
-Raw data: [`results/baseline/lob_benchmark.csv`](results/baseline/lob_benchmark.csv).
-Reproduce with `./bench_lob` (or `./bench_lob --repeat 25`).
+Measured on an i7-1165G7 (4C/8T), Ubuntu 22.04 under WSL2, GCC 11.4 `-O3`, pinned to
+CPU 7, on AC power. Timer floor 9.3 ns p50; `steady_clock` minimum observable delta
+on this host 12 ns.
+Raw data: [`results/baseline/lob_benchmark_linux.csv`](results/baseline/lob_benchmark_linux.csv).
+Reproduce with `./bench_lob` (or `./bench_lob --repeat 25 --pin 3`).
 
-The throughput column is the meaningful one. Windows `steady_clock` ticks at
-~100 ns, so the per-op percentiles are quantised to that grid and should be read
-as "at or below one clock tick", not as precise latencies. Throughput is measured
-across all 50k ops at once and does not suffer from this.
+Windows cross-check, same silicon and power state, GCC 14.2 `-O3`, timer floor 8.9 ns
+([raw data](results/baseline/lob_benchmark_windows.csv)):
+
+| Scenario | ops/sec (median) | p50 | p95 | p99 |
+|---|---:|---:|---:|---:|
+| insert (ladder region) | 22.80 M | 56 ns | 65 ns | 81 ns |
+| insert (overflow map region) | 13.24 M | 85 ns | 105 ns | 117 ns |
+| cancel (ladder region) | 247.55 M | 9 ns | 9 ns | 11 ns |
+| cancel (overflow map region) | 27.55 M | 37 ns | 55 ns | 71 ns |
+| match (crossing, partial fill) | 25.83 M | 49 ns | 56 ns | 66 ns |
+
+The platforms differ by up to ~1.5x on absolute per-op cost — different compiler
+versions, different codegen, and WSL2 is a VM — but agree on the structural claims:
+the ladder region beats the overflow map on every operation, and cancel-in-ladder is
+the cheapest path in the book at single-digit nanoseconds. The cancel ratio is 6.2x
+on Linux and 9.0x on Windows, ranges disjoint on both. The insert ratio is weaker:
+2.9x with disjoint ranges on Linux, but 1.7x with *overlapping* ranges on Windows, so
+treat insert as directional and cancel as the solid result.
+
+**Why these numbers differ from earlier revisions.** A previous version of this table
+reported 9.09 M / 18.71 M / 10.10 M ops/sec with percentiles quantised to a 100 ns
+grid. Two `steady_clock` reads sat inside the timed loop and were being counted as
+part of each operation. On Windows `steady_clock` *ticks* at 100 ns but *costs* ~25 ns
+to read, so that instrumentation was charged to the book on every op — understating
+throughput across the board, and understating cancel-in-ladder by more than 6x, since
+a ~50 ns tax swamps a ~4 ns operation. It also flattened the ladder-vs-overflow cancel
+ratio to an apparent 1.5x, hiding the design property the benchmark exists to show.
+
+Throughput and the floor-corrected p50 are now independent estimates of the same
+quantity, and they agree within 10–27% on every scenario on both platforms — a
+consistency check the old numbers failed badly. The exception is cancel-in-ladder,
+where throughput implies ~4–6 ns/op against a corrected p50 of 9 ns: that operation
+is now *below the resolving power of the instrument*, since the fenced read pair costs
+~9 ns on its own. For that row the throughput column is the number to trust, and "under
+10 ns" is the strongest honest claim available without switching to batched timing.
 
 ---
 
@@ -365,7 +408,18 @@ A few things this project deliberately does not claim:
   which are real effects at this timescale. Local agents are not delayed at all.
   It is enough to make stale quotes and adverse selection real; it is not a
   model of an exchange's network.
-- **Book percentiles are clock-limited**, as described above.
+- **The fastest book operation is at the instrument's floor.** The `rdtsc` timer,
+  its calibration, and the measured noise floor put per-op resolution at roughly
+  9 ns on this host. Cancel-in-ladder runs faster than that, so its percentiles are
+  a bound rather than a measurement and only its throughput figure is meaningful.
+  Every other scenario sits comfortably above the floor. Resolving the fast path
+  properly would need batched timing, which trades away the tail percentiles.
+- **The benchmark host is not an isolated machine.** Both baselines were taken on a
+  laptop under a hypervisor, with no `isolcpus`, no fixed frequency governor, and no
+  control over turbo. The thread is pinned and the environment is recorded, but the
+  `max` column — hundreds of microseconds against a sub-100 ns p99 — is OS preemption,
+  not the book. The noise floor's own `max` shows the same spikes, which is how you
+  can tell them apart from real work.
 - **The simulator is not a market.** Prices follow geometric Brownian motion,
   market makers quote off a fair value with a volatility-sensitive spread, and
   noise traders arrive as a Poisson process with lognormal sizes. That is enough

@@ -1,0 +1,10 @@
+# os=Linux (WSL); cpu=11th Gen Intel(R) Core(TM) i7-1165G7 @ 2.80GHz; logical_cpus=8; pinned_cpu=7; timer=rdtsc; tsc_invariant=yes; tsc_ghz=2.80319; min_timer_delta_ns=7.84819; steady_clock_delta_ns=12; governor=unavailable; turbo=unavailable; hypervisor=yes
+# measured_ops_per_run=50000; runs=9; timer_floor_p50_ns=9.27514
+# throughput measured on an uninstrumented pass; adj_* percentiles have the timer floor p50 subtracted
+scenario,runs,median_ops_per_sec,min_ops_per_sec,max_ops_per_sec,p50_ns,p95_ns,p99_ns,p999_ns,max_ns,adj_p50_ns,adj_p95_ns,adj_p99_ns,adj_p999_ns,adj_max_ns
+"timer noise floor (no work between reads)",9,3.61663e+07,2.86064e+07,3.82062e+07,9.27514,10.3453,10.7021,11.0588,28732.9,9.27514,10.3453,10.7021,11.0588,28732.9
+"insert (ladder region)",9,3.14314e+07,2.25506e+07,4.42479e+07,43.8785,50.6565,52.7969,63.8557,160498,34.6034,41.3814,43.5218,54.5806,160489
+"insert (overflow map region)",9,1.07497e+07,6.36066e+06,1.15356e+07,108.448,145.192,164.812,499.787,803492,99.1726,135.916,155.537,490.512,803482
+"cancel (ladder region)",9,1.68368e+08,7.86644e+07,2.60267e+08,18.5503,21.0474,23.1878,28.8956,169357,9.27514,11.7723,13.9127,19.6205,169348
+"cancel (overflow map region)",9,2.7284e+07,2.53551e+07,2.92503e+07,48.5161,68.1366,82.406,158.391,95638.4,39.241,58.8614,73.1309,149.116,95629.2
+"match (crossing, single-level partial fill)",9,3.63045e+07,2.6418e+07,5.67179e+07,38.1708,43.1651,44.2353,47.0892,18274.2,28.8956,33.8899,34.9601,37.814,18264.9
