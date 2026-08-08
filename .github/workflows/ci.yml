@@ -77,3 +77,6 @@ jobs:
 
       - name: Order book microbenchmark
         run: ./build/bench_lob --repeat 1
+
+      - name: Routing decision microbenchmark
+        run: ./build/bench_sor --repeat 1

@@ -22,6 +22,7 @@ file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)
 list(REMOVE_ITEM CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/bench/bench_lob.cpp
+    ${CMAKE_SOURCE_DIR}/src/bench/bench_sor.cpp
     ${CMAKE_SOURCE_DIR}/src/calibrate/main.cpp
 )
 
@@ -36,6 +37,10 @@ target_link_libraries(high_frequency PRIVATE hft_core hft_warnings)
 # Standalone single-threaded LimitOrderBook microbenchmark
 add_executable(bench_lob src/bench/bench_lob.cpp)
 target_link_libraries(bench_lob PRIVATE hft_core hft_warnings)
+
+# Standalone single-threaded routing-decision (DPEngine) microbenchmark
+add_executable(bench_sor src/bench/bench_sor.cpp)
+target_link_libraries(bench_sor PRIVATE hft_core hft_warnings)
 
 # Randomized parameter-sweep calibration tool
 add_executable(calibrate src/calibrate/main.cpp)

@@ -166,6 +166,118 @@ is now *below the resolving power of the instrument*, since the fenced read pair
 ~9 ns on its own. For that row the throughput column is the number to trust, and "under
 10 ns" is the strongest honest claim available without switching to batched timing.
 
+### Routing decision microbenchmark
+
+The book benchmark measures the data structure; this one measures the decision. One
+sample is a complete `compute_optimal_split` call — visible-liquidity reads, the lit
+and dark cost tables, the DP sweep, backtracking, and the odd-lot remainder pass —
+called directly, with no threads, queues, or simulated wire delay in the path. Same
+instrument as `bench_lob`: pinned thread, calibrated `rdtsc`, measured noise floor
+subtracted, uninstrumented throughput pass separate from the instrumented percentile
+pass, medians of 9 runs.
+
+Sample counts fall as the work per call rises, so each row is budgeted to roughly the
+same total work rather than the same iteration count — 20,000 calls at the smallest
+size down to 400 at the largest. The tool prints the sample count per row and the CSV
+records it, so a percentile can be weighed against how many samples are behind it.
+
+| Parent size | W | decisions/sec | p50 | p95 | p99 | ns per `V·W²/2` |
+|---:|---:|---:|---:|---:|---:|---:|
+| 500 | 19 | 246,898 | 3.90 µs | 4.40 µs | 6.12 µs | 7.20 |
+| 1,000 | 38 | 172,603 | 5.55 µs | 6.49 µs | 8.79 µs | 2.56 |
+| 2,500 | 93 | 64,284 | 15.05 µs | 17.13 µs | 23.43 µs | 1.16 |
+| 5,000 | 186 | 20,883 | 45.84 µs | 52.29 µs | 67.83 µs | 0.88 |
+| 10,000 | 371 | 5,935 | 163.0 µs | 188.7 µs | 219.7 µs | 0.79 |
+| 25,000 | 926 | 993 | 970.9 µs | 1.10 ms | 1.24 ms | 0.75 |
+
+`W = size/lot_size + 1`, at the calibrated `lot_size` of 27. The harness's configured
+parent range is 500–10,000 shares, so the first five rows are the sizes the Monte Carlo
+actually routes; 25,000 is there to show where the curve goes.
+
+**The `O(V·W²)` claim holds, but only once `W` is large enough for it to.** Consecutive
+p50 ratios against what `W²` predicts:
+
+| W transition | measured | `W²` predicts |
+|---|---:|---:|
+| 19 → 38 | 1.42x | 4.00x |
+| 38 → 93 | 2.72x | 5.99x |
+| 93 → 186 | 3.05x | 4.00x |
+| 186 → 371 | 3.56x | 3.98x |
+| 371 → 926 | 5.96x | 6.23x |
+
+Below `W ≈ 100` the quadratic term is not what you are paying for: the last column of
+the main table, nanoseconds per unit of predicted work, falls 10x across the sweep and
+only flattens around 0.75–0.79 at the top. The pure `c·V·W²` model does not describe
+this curve. Fitting the three-term one it implies — a fixed cost, a term linear in
+`V·W` for tables that grow with `W`, and the quadratic sweep — to the W = 19, 371 and
+926 rows gives:
+
+```
+decision_ns  ≈  3120  +  6.8·(V·W)  +  0.738·(V·W²/2)
+```
+
+which then predicts the two rows it was not fitted to, W = 93 and W = 186, within 3%.
+So there is a **~3.1 µs floor on every routing decision regardless of size** — two heap
+allocations for the DP and choice tables, an `available_liquidity` walk per lit venue,
+and the returned `SplitResult` vectors — and the quadratic term only overtakes that
+setup cost somewhere between a 1,000- and a 2,500-share parent. Small parents are bound
+by setup; large parents are bound by the DP.
+
+Cost is linear in venue count as expected — at a fixed 5,000-share parent, 3 / 6 / 12
+venues cost 45.8 / 97.2 / 203.0 µs p50, ratios of 2.12x and 2.09x against a predicted
+2.00x. Lit and dark venues run the same inner loop, so only the total count matters.
+
+**What optimality costs**, at a 10,000-share parent across 3 venues:
+
+| Strategy | decisions/sec | p50 | p95 | vs. DP |
+|---|---:|---:|---:|---:|
+| SOR (DP) | 5,898 | 162.7 µs | 188.3 µs | — |
+| Proportional | 557,204 | 1.74 µs | 2.01 µs | 93x cheaper |
+| Naive | 1,480,629 | 670 ns | 770 ns | 243x cheaper |
+
+Measured on an i7-1165G7 (4C/8T), Windows 11, GCC 14.2 `-O3`, pinned to CPU 7, timer
+floor 9.6 ns p50 — the same host and build as the Windows book cross-check above.
+Raw data: [`results/baseline/sor_benchmark_windows.csv`](results/baseline/sor_benchmark_windows.csv).
+Reproduce with `./bench_sor` (or `./bench_sor --repeat 3 --lot-size 100`).
+
+**What this changes about the rest of the project.** The routing decision is three to
+four orders of magnitude more expensive than any book operation — a 10,000-share parent
+costs ~163 µs to decide against the ~56 ns it takes to insert an order on the same
+host, a factor of ~2,900 — and it is comparable to the
+modelled wire time it is competing with, since the slowest venue's simulated one-way
+latency is 202 µs. At the top of the configured size range the router spends about as
+long deciding where to send the order as the order spends in flight. `bench_lob` numbers
+are not the tick-to-trade story; this table is the part of it that is actually code
+executing.
+
+Two consequences worth naming. First, `compute_split` is called from both the
+client-order loop and, on a partial fill, from `process_fill` on the fill thread — where
+it runs holding `order_mutex` and a shared lock on `book_mutex`, so a reroute decision
+stalls fill draining for its full duration, up to `max_reroute_attempts` times per
+parent.
+
+Second, **`lot_size` is a latency control, not just a rounding parameter, and nothing
+in the project currently treats it as one.** `W` is `size/lot_size`, so decision cost
+falls roughly quadratically as the lot gets coarser. Re-running the sweep confirms it,
+and the fitted rate above (0.738 ns per `V·W²/2`, obtained at `lot_size` 27) reproduces
+at 0.746–0.765 across completely different lot sizes:
+
+| `lot_size` | W at a 10,000-share parent | p50 decision |
+|---:|---:|---:|
+| 100 | 101 | 15.7 µs |
+| 27 (calibrated) | 371 | 163 µs |
+| 5 | 2,001 | 4.54 ms |
+
+The calibrator sweeps `router.lot_size` over `[1, 50]` and scores candidates purely on
+execution quality — `2·shortfall_edge + slippage_edge + 50·fillrate_edge`, with no term
+for decision latency. Its search space therefore contains configurations whose routing
+decisions take milliseconds: at `lot_size` 5 a 25,000-share parent costs 28 ms to
+decide, and the sweep would happily select it if the fills came out marginally better.
+The calibrated value of 27 is fine, but it is fine by accident.
+
+Neither issue is fixed here — the point of adding the benchmark was to stop guessing
+about them.
+
 ---
 
 ## How the routing decision works
@@ -363,6 +475,8 @@ from an unoptimised binary are meaningless, so this is deliberate.
 ./build/high_frequency --trials 100     # ...over more trials, to shrink run-to-run noise
 ./build/high_frequency --no-proportional # ...SOR vs naive only, for a faster two-arm run
 ./build/bench_lob                       # order book microbenchmark
+./build/bench_sor                       # routing decision (DP engine) microbenchmark
+./build/bench_sor --lot-size 100        # ...at a coarser lot size, which shrinks W
 ./build/calibrate                       # randomised parameter sweep
 ```
 
@@ -453,7 +567,15 @@ A few things this project deliberately does not claim:
   — most of the reported figure is the simulator deliberately waiting, not code
   executing, which is why the numbers jumped roughly 400 µs when the latency
   model landed. The program prints this caveat itself rather than burying it.
-  `bench_lob` is the clean, threading-free latency measurement.
+  `bench_lob` and `bench_sor` are the clean, threading-free latency measurements —
+  the book and the routing decision respectively.
+- **The `max` column in both benchmarks is the operating system, not the code.** On
+  this host the timer noise floor — two back-to-back reads with nothing between them
+  — itself records a max in the tens to hundreds of microseconds across a 450k-sample
+  run. Anything at that magnitude in a `max` column is a preemption or a page fault
+  that happened to land inside a timed window. Read p50 through p99; the maxima are
+  reported for completeness and are only meaningful as evidence that the host is not
+  isolated.
 - **The latency model is a link-time model, not a network model.** One symmetric
   one-way delay per venue covers order entry, market data, and fill acks alike.
   There is no jitter, no queueing delay at the venue gateway, no separate
