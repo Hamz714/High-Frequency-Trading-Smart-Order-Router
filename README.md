@@ -296,7 +296,7 @@ Each writes a timestamped CSV into `results/`. The committed baselines in
 
 ### Tests
 
-140 GoogleTest cases across the book, queues, router, DP engine, simulation
+142 GoogleTest cases across the book, queues, router, DP engine, simulation
 agents, analytics, and the venue latency model.
 
 ```bash
@@ -306,6 +306,27 @@ ctest --test-dir build --output-on-failure
 ```
 
 The build is warning-clean under `-Wall -Wextra`.
+
+### Sanitizers
+
+The concurrency here is hand-rolled — two lock-free queues, a `shared_mutex`
+guarding the consolidated book, and eight threads per trial — so a passing test
+suite is not by itself evidence that any of it is race-free. CI therefore
+rebuilds the project and the tests under ThreadSanitizer, and separately under
+AddressSanitizer + UndefinedBehaviorSanitizer, runs the full suite under each,
+then runs the integrated eight-thread pipeline on top of that.
+
+**The test suite and a full multi-venue run are clean under ThreadSanitizer — no
+data races and no lock-order inversions reported.** Both are also clean under
+ASan and UBSan, with leak detection enabled.
+
+```bash
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_CXX_FLAGS="-fsanitize=thread -g" \
+      -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=thread -g"
+cmake --build build-tsan -j
+ctest --test-dir build-tsan --output-on-failure
+```
 
 ### Calibration
 
