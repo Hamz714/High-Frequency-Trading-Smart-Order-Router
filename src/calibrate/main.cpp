@@ -93,11 +93,20 @@ SimConfig perturb(const SimConfig& base, const std::vector<ParamSpec>& specs, st
     return config;
 }
 
-double objective(const harness::ArmSummary& sor, const harness::ArmSummary& naive) {
-    double shortfall_edge = naive.mean_shortfall_bps - sor.mean_shortfall_bps;
-    double slippage_edge = naive.mean_slippage_bps - sor.mean_slippage_bps;
-    double fillrate_edge = sor.mean_fill_rate - naive.mean_fill_rate;
+const harness::ArmSummary& arm_of(const harness::ArmSummaries& summaries, RoutingStrategy arm) {
+    return summaries[static_cast<size_t>(arm)];
+}
+
+double objective(const harness::ArmSummary& sor, const harness::ArmSummary& baseline) {
+    double shortfall_edge = baseline.mean_shortfall_bps - sor.mean_shortfall_bps;
+    double slippage_edge = baseline.mean_slippage_bps - sor.mean_slippage_bps;
+    double fillrate_edge = sor.mean_fill_rate - baseline.mean_fill_rate;
     return 2.0 * shortfall_edge + 1.0 * slippage_edge + 50.0 * fillrate_edge;
+}
+
+double scored_objective(const harness::ArmSummaries& summaries) {
+    return objective(arm_of(summaries, RoutingStrategy::DP_OPTIMAL),
+                     arm_of(summaries, RoutingStrategy::PROPORTIONAL));
 }
 
 void print_config_literal(const SimConfig& config) {
@@ -171,13 +180,12 @@ int main(int argc, char** argv) {
     std::vector<ParamSpec> specs = build_param_specs();
     std::mt19937 rng(seed);
     SimConfig base = default_sim_config();
-    base.harness.arms = { RoutingStrategy::DP_OPTIMAL, RoutingStrategy::NAIVE };
 
     std::filesystem::create_directories("results");
     std::string csv_path = "results/calibration_" + harness::timestamp_string() + ".csv";
     std::ofstream csv(csv_path);
     csv << "sample_index,status,score,shortfall_edge_bps,slippage_edge_bps,fillrate_edge,"
-           "sor_fill_rate,naive_fill_rate,total_drops";
+           "shortfall_edge_vs_naive_bps,sor_fill_rate,proportional_fill_rate,naive_fill_rate,total_drops";
     for (const auto& spec : specs) csv << "," << spec.name;
     csv << "\n";
 
@@ -200,24 +208,27 @@ int main(int argc, char** argv) {
 
         harness::MonteCarloRunResult result = harness::run_monte_carlo(candidate, /*show_progress=*/false);
         harness::ArmSummaries summaries = harness::summarize_all(result);
-        const harness::ArmSummary& sor = summaries[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
-        const harness::ArmSummary& naive = summaries[static_cast<size_t>(RoutingStrategy::NAIVE)];
+        const harness::ArmSummary& sor = arm_of(summaries, RoutingStrategy::DP_OPTIMAL);
+        const harness::ArmSummary& proportional = arm_of(summaries, RoutingStrategy::PROPORTIONAL);
+        const harness::ArmSummary& naive = arm_of(summaries, RoutingStrategy::NAIVE);
 
         harness::ValidityGate gate{ .max_allowed_drops = 0, .min_fill_rate = 0.5 };
         bool drops_ok = result.total_drops <= gate.max_allowed_drops;
-        bool fillrate_ok = sor.mean_fill_rate >= gate.min_fill_rate && naive.mean_fill_rate >= gate.min_fill_rate;
+        bool fillrate_ok = harness::passes_validity_gate(candidate.harness.arms, summaries, 0, gate);
         bool valid = drops_ok && fillrate_ok;
 
-        double shortfall_edge = naive.mean_shortfall_bps - sor.mean_shortfall_bps;
-        double slippage_edge = naive.mean_slippage_bps - sor.mean_slippage_bps;
-        double fillrate_edge = sor.mean_fill_rate - naive.mean_fill_rate;
-        double score = objective(sor, naive);
+        double shortfall_edge = proportional.mean_shortfall_bps - sor.mean_shortfall_bps;
+        double slippage_edge = proportional.mean_slippage_bps - sor.mean_slippage_bps;
+        double fillrate_edge = sor.mean_fill_rate - proportional.mean_fill_rate;
+        double shortfall_edge_vs_naive = naive.mean_shortfall_bps - sor.mean_shortfall_bps;
+        double score = scored_objective(summaries);
 
         std::string status = valid ? "valid" : (!drops_ok ? "rejected_drops" : "rejected_fillrate");
         if (valid) valid_count++; else if (!drops_ok) rejected_drops++; else rejected_fillrate++;
 
         csv << i << "," << status << "," << score << "," << shortfall_edge << "," << slippage_edge << ","
-            << fillrate_edge << "," << sor.mean_fill_rate << "," << naive.mean_fill_rate << "," << result.total_drops;
+            << fillrate_edge << "," << shortfall_edge_vs_naive << "," << sor.mean_fill_rate << ","
+            << proportional.mean_fill_rate << "," << naive.mean_fill_rate << "," << result.total_drops;
         for (const auto& [name, value] : sampled) csv << "," << value;
         csv << "\n";
         csv.flush();
@@ -272,11 +283,11 @@ int main(int argc, char** argv) {
 
         harness::MonteCarloRunResult result = harness::run_monte_carlo(candidate, /*show_progress=*/false);
         harness::ArmSummaries summaries = harness::summarize_all(result);
-        const harness::ArmSummary& sor = summaries[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
-        const harness::ArmSummary& naive = summaries[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
-        bool valid = result.total_drops == 0 && sor.mean_fill_rate >= 0.5 && naive.mean_fill_rate >= 0.5;
-        double score = objective(sor, naive);
+        harness::ValidityGate gate{ .max_allowed_drops = 0, .min_fill_rate = 0.5 };
+        bool valid = harness::passes_validity_gate(candidate.harness.arms, summaries,
+                                                    result.total_drops, gate);
+        double score = scored_objective(summaries);
 
         std::cout << "[ CALIBRATE ] revalidate #" << k << " sweep_score=" << valid_samples[k].score
                    << " revalidated_score=" << (valid ? std::to_string(score) : std::string("REJECTED")) << "\n";
@@ -303,13 +314,9 @@ int main(int argc, char** argv) {
 
     harness::MonteCarloRunResult before_result = harness::run_monte_carlo(confirm_default);
     harness::ArmSummaries before = harness::summarize_all(before_result);
-    const harness::ArmSummary& before_sor = before[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
-    const harness::ArmSummary& before_naive = before[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
     harness::MonteCarloRunResult after_result = harness::run_monte_carlo(confirm_best);
     harness::ArmSummaries after = harness::summarize_all(after_result);
-    const harness::ArmSummary& after_sor = after[static_cast<size_t>(RoutingStrategy::DP_OPTIMAL)];
-    const harness::ArmSummary& after_naive = after[static_cast<size_t>(RoutingStrategy::NAIVE)];
 
     if (before_result.total_drops > 0 || after_result.total_drops > 0) {
         std::cerr << "[ WARN ] confirmatory run saw drops (before=" << before_result.total_drops
@@ -321,12 +328,22 @@ int main(int argc, char** argv) {
     std::cout << "\n=== AFTER: calibrated config ===";
     harness::print_comparison(confirm_best.harness.arms, after, confirm_best);
 
-    double edge_before = objective(before_sor, before_naive);
-    double edge_after = objective(after_sor, after_naive);
-    std::cout << "\nEdge score (2*shortfall_edge + slippage_edge + 50*fillrate_edge):\n"
+    double edge_before = scored_objective(before);
+    double edge_after = scored_objective(after);
+    std::cout << "\nEdge score vs. the proportional arm "
+                 "(2*shortfall_edge + slippage_edge + 50*fillrate_edge):\n"
               << "  before = " << edge_before << "\n"
               << "  after  = " << edge_after << "\n"
               << "  improvement = " << (edge_after - edge_before) << "\n";
+
+    double naive_edge_before = objective(arm_of(before, RoutingStrategy::DP_OPTIMAL),
+                                          arm_of(before, RoutingStrategy::NAIVE));
+    double naive_edge_after = objective(arm_of(after, RoutingStrategy::DP_OPTIMAL),
+                                         arm_of(after, RoutingStrategy::NAIVE));
+    std::cout << "\nSame score against the naive arm (reported, not optimised):\n"
+              << "  before = " << naive_edge_before << "\n"
+              << "  after  = " << naive_edge_after << "\n"
+              << "  improvement = " << (naive_edge_after - naive_edge_before) << "\n";
 
     std::string before_path = "results/calibration_confirmatory_before_" + harness::timestamp_string() + ".csv";
     harness::export_csv(before_result, before_path);

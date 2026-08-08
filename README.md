@@ -417,12 +417,17 @@ particular was tuned against a penalty that cost the router nothing, so it is
 now fit to the wrong environment. Re-running the sweep under simulated latency
 is the obvious next step and would likely move it.
 
-The sweep also still scores candidates by SOR-vs-naive edge, and runs only those
-two arms to keep its cost down. Since naive is the isolator rather than the
-baseline worth beating, that objective now optimises against the weaker opponent;
-rescoring it against the proportional arm is the second thing to fix here. The
-reported comparison is unaffected — that runs all three arms — but the tuned
-defaults were chosen under the old objective.
+The sweep runs all three arms and scores candidates by the SOR's edge over the
+**proportional** arm, not the naive one — optimising against the strawman would
+tune the router to beat an opponent nobody fields. The naive edge is still
+computed and written to the sweep CSV, it just does not drive the search. A
+candidate must clear the fill-rate gate on every arm to count as valid, so a
+configuration that quietly breaks one baseline cannot win by default.
+
+The defaults currently committed predate that change: they were fitted against
+the naive-edge objective, before latency was simulated. Re-running the sweep is
+the obvious next step, and note it now costs ~50% more wall time per sample than
+the numbers `--time-budget-minutes` was tuned against.
 
 ---
 
