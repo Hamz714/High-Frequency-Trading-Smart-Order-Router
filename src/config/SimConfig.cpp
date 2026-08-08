@@ -3,11 +3,11 @@
 SimConfig default_sim_config() {
     SimConfig config;
 
-    config.market.lit_venue_1 = VenueConfig{ .type = LIT, .fee_per_share = 0.0004265839, .latency_us = 202,
+    config.market.lit_venue_1 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0004265839, .latency_us = 202,
                                                .impact_coefficient = 6.8286654515, .historical_fill_ratio = 0.0 };
-    config.market.lit_venue_2 = VenueConfig{ .type = LIT, .fee_per_share = 0.0009485735, .latency_us = 46,
+    config.market.lit_venue_2 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0009485735, .latency_us = 46,
                                                .impact_coefficient = 4.7917416000, .historical_fill_ratio = 0.0 };
-    config.market.dark_venue = VenueConfig{ .type = DARK, .fee_per_share = 0.0000894663, .latency_us = 71,
+    config.market.dark_venue = VenueConfig{ .type = VenueType::DARK, .fee_per_share = 0.0000894663, .latency_us = 71,
                                               .impact_coefficient = 0.0, .historical_fill_ratio = 0.6989994222 };
 
     config.market.mm_lit_venue_1 = MarketMakerConfig{ .base_spread = 10, .spread_sensitivity = 0.8812188427,

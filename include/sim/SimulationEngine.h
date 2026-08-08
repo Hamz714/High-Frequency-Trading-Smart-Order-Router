@@ -25,7 +25,7 @@ private:
     void worker_loop(double dt);
 
 public:
-    SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock);
+    SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock_in);
     ~SimulationEngine();
 
     void add_market_maker(Venue* venue, const MarketMakerConfig& cfg, uint32_t seed,

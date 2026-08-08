@@ -11,15 +11,15 @@ using OrderID = int64_t;
 
 using VenueID = int64_t;
 
-enum Side {BUY, SELL};
+enum class Side : uint8_t { BUY, SELL };
 
-enum OrderType {LIMIT, MARKET, IOC, FOK};
+enum class OrderType : uint8_t { LIMIT, MARKET, IOC, FOK };
 
-enum SenderType {SOR, MM, NOISE};
+enum class SenderType : uint8_t { SOR, MM, NOISE };
 
-enum OrderStatus {PARTIAL, FILLED, CANCELLED};
+enum class OrderStatus : uint8_t { PARTIAL, FILLED, CANCELLED };
 
-enum RequestType {ORDER, CANCEL};
+enum class RequestType : uint8_t { ORDER, CANCEL };
 
 struct Order {
     OrderID id;
@@ -66,7 +66,7 @@ struct FillEvent {
     int64_t visible_ns = 0;
 };
 
-enum VenueType {LIT, DARK};
+enum class VenueType : uint8_t { LIT, DARK };
 
 struct VenueConfig {
     VenueType type;
@@ -95,7 +95,7 @@ inline QueueSizingConfig default_queue_sizing() {
                               DEFAULT_QUEUE_CAPACITY };
 }
 
-enum class RoutingStrategy { DP_OPTIMAL, PROPORTIONAL, NAIVE };
+enum class RoutingStrategy : uint8_t { DP_OPTIMAL, PROPORTIONAL, NAIVE };
 
 inline constexpr size_t NUM_ROUTING_STRATEGIES = 3;
 
@@ -179,7 +179,7 @@ struct TradeEvent {
     SenderType sender_type;
 };
 
-enum class OrderEventType { DECISION, FILL, COMPLETION };
+enum class OrderEventType : uint8_t { DECISION, FILL, COMPLETION };
 
 struct OrderLifecycleEvent {
     OrderEventType type;

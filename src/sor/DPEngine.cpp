@@ -60,7 +60,7 @@ SplitResult DPEngine::compute_optimal_split(int64_t total_size, Side side, int64
     std::vector<std::pair<const VenueState*, int>> dark_venues;
 
     for (size_t i = 0; i < venues.size(); ++i) {
-        if (venues[i].config.type == LIT) {lit_venues.push_back({&venues[i], i});} else {dark_venues.push_back({&venues[i], i});}
+        if (venues[i].config.type == VenueType::LIT) {lit_venues.push_back({&venues[i], i});} else {dark_venues.push_back({&venues[i], i});}
     }
 
     const double INF = std::numeric_limits<double>::max();
@@ -200,7 +200,7 @@ SplitResult DPEngine::compute_proportional_split(int64_t total_size, Side side, 
     int64_t total_displayed = 0;
 
     for (size_t i = 0; i < venues.size(); ++i) {
-        if (venues[i].config.type != LIT) continue;
+        if (venues[i].config.type != VenueType::LIT) continue;
         displayed[i] = venues[i].get_visible_liquidity(side, worst_price);
         total_displayed += displayed[i];
     }
@@ -265,12 +265,12 @@ SplitResult DPEngine::compute_naive_split(int64_t total_size, Side side, int64_t
     result.expected_cost = std::numeric_limits<double>::max();
 
     int best_index = -1;
-    int64_t best_price = (side == BUY) ? std::numeric_limits<int64_t>::max() : 0;
+    int64_t best_price = (side == Side::BUY) ? std::numeric_limits<int64_t>::max() : 0;
 
     for (size_t i = 0; i < venues.size(); ++i) {
-        if (venues[i].config.type != LIT) continue;
+        if (venues[i].config.type != VenueType::LIT) continue;
 
-        if (side == BUY) {
+        if (side == Side::BUY) {
             int64_t ask = venues[i].get_best_ask();
             if (ask < best_price) {
                 best_price = ask;

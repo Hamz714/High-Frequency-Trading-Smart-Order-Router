@@ -2,8 +2,8 @@
 
 #include <cmath>
 
-SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock)
-    : price_process(std::move(pp)), clock(clock) {}
+SimulationEngine::SimulationEngine(std::unique_ptr<PriceProcess> pp, SimClock* clock_in)
+    : price_process(std::move(pp)), clock(clock_in) {}
 
 SimulationEngine::~SimulationEngine() {
     stop();

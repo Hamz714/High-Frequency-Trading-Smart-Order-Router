@@ -32,7 +32,7 @@ protected:
 
     void start(const MarketMakerConfig& cfg, uint32_t seed = 42) {
         VenueConfig vcfg{
-            .type = LIT,
+            .type = VenueType::LIT,
             .fee_per_share = 0.0,
             .latency_us = 0,
             .impact_coefficient = 0.0,
@@ -75,7 +75,7 @@ TEST_F(MarketMakerTest, Update_EmptyBook_PostsOrdersOnBothSidesAwayFromFairValue
     int bid_count = 0, ask_count = 0;
     for (const BookDelta& d : deltas) {
         EXPECT_GT(d.new_quantity, 0);
-        if (d.side == BUY) {
+        if (d.side == Side::BUY) {
             EXPECT_LT(d.price, 1000);
             bid_count++;
         } else {
@@ -137,7 +137,7 @@ TEST_F(MarketMakerTest, Update_MovingFairValueFarAway_CancelsStaleOrdersAndReple
     int new_side_count = 0;
     for (const BookDelta& d : deltas) {
         if (d.price < 1500) {
-            if (d.side == BUY) {
+            if (d.side == Side::BUY) {
                 last_old_bid_qty = d.new_quantity;
             } else {
                 last_old_ask_qty = d.new_quantity;
@@ -145,7 +145,7 @@ TEST_F(MarketMakerTest, Update_MovingFairValueFarAway_CancelsStaleOrdersAndReple
         } else {
             new_side_count++;
             EXPECT_GT(d.new_quantity, 0);
-            if (d.side == BUY) {
+            if (d.side == Side::BUY) {
                 EXPECT_LT(d.price, 2000);
             } else {
                 EXPECT_GT(d.price, 2000);

@@ -114,7 +114,7 @@ void print_config_literal(const SimConfig& config) {
     std::cout << "\n--- Paste into src/config/SimConfig.cpp's default_sim_config() body ---\n\n";
 
     auto venue = [](const char* var, const VenueConfig& v) {
-        std::cout << "    config.market." << var << " = VenueConfig{ .type = " << (v.type == LIT ? "LIT" : "DARK")
+        std::cout << "    config.market." << var << " = VenueConfig{ .type = " << (v.type == VenueType::LIT ? "VenueType::LIT" : "VenueType::DARK")
                    << ", .fee_per_share = " << v.fee_per_share << ", .latency_us = " << v.latency_us
                    << ",\n                                               .impact_coefficient = " << v.impact_coefficient
                    << ", .historical_fill_ratio = " << v.historical_fill_ratio << " };\n";
@@ -165,8 +165,8 @@ int main(int argc, char** argv) {
     double time_budget_minutes = 90.0;
 
     for (int i = 1; i < argc; ++i) {
-        auto next_double = [&](int& i) { return std::stod(argv[++i]); };
-        auto next_int = [&](int& i) { return std::stoi(argv[++i]); };
+        auto next_double = [&](int& idx) { return std::stod(argv[++idx]); };
+        auto next_int = [&](int& idx) { return std::stoi(argv[++idx]); };
 
         if (std::strcmp(argv[i], "--samples") == 0 && i + 1 < argc) samples = next_int(i);
         else if (std::strcmp(argv[i], "--trials-per-sample") == 0 && i + 1 < argc) trials_per_sample = next_int(i);

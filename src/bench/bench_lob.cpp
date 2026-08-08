@@ -76,8 +76,8 @@ double elapsed_seconds(uint64_t start_ticks) {
 }
 
 void seed_touch(LimitOrderBook& book) {
-    book.submit(BUY, LIMIT, TOUCH_BID, RESTING_QTY);
-    book.submit(SELL, LIMIT, TOUCH_ASK, RESTING_QTY);
+    book.submit(Side::BUY, OrderType::LIMIT, TOUCH_BID, RESTING_QTY);
+    book.submit(Side::SELL, OrderType::LIMIT, TOUCH_ASK, RESTING_QTY);
 }
 
 // Stays within ~100 ticks of the touch - comfortably inside the 256-wide
@@ -93,7 +93,7 @@ std::vector<OrderID> seed_liquidity(LimitOrderBook& book, int count, bool shallo
     ids.reserve(count);
     for (int i = 0; i < count; ++i) {
         int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
-        auto fills = book.submit(BUY, LIMIT, price, RESTING_QTY);
+        auto fills = book.submit(Side::BUY, OrderType::LIMIT, price, RESTING_QTY);
         ids.push_back(fills.back().order_id);
     }
     return ids;
@@ -130,7 +130,7 @@ BenchResult run_insert_benchmark(const std::string& name, bool shallow, bool ins
             int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
 
             uint64_t t0 = cycle_now();
-            book.submit(BUY, LIMIT, price, RESTING_QTY);
+            book.submit(Side::BUY, OrderType::LIMIT, price, RESTING_QTY);
             uint64_t t1 = cycle_now();
 
             latencies_ns.push_back(cycles_to_ns(t1 - t0));
@@ -138,7 +138,7 @@ BenchResult run_insert_benchmark(const std::string& name, bool shallow, bool ins
     } else {
         for (int i = 0; i < MEASURED_OPS; ++i) {
             int64_t price = TOUCH_BID - (shallow ? shallow_offset(i) : deep_offset(i));
-            book.submit(BUY, LIMIT, price, RESTING_QTY);
+            book.submit(Side::BUY, OrderType::LIMIT, price, RESTING_QTY);
         }
     }
     double total_seconds = elapsed_seconds(bench_start);
@@ -192,10 +192,10 @@ BenchResult run_match_benchmark(const std::string& name, bool /*shallow*/, bool 
     constexpr int64_t DEEP_RESTING_QTY = 10'000'000;
     constexpr int64_t MATCH_QTY = 10;
 
-    book.submit(SELL, LIMIT, TOUCH_ASK, DEEP_RESTING_QTY);
+    book.submit(Side::SELL, OrderType::LIMIT, TOUCH_ASK, DEEP_RESTING_QTY);
 
     for (int i = 0; i < WARMUP_OPS; ++i) {
-        book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);  // warm-up, discarded
+        book.submit(Side::BUY, OrderType::IOC, TOUCH_ASK, MATCH_QTY);  // warm-up, discarded
     }
 
     std::vector<double> latencies_ns;
@@ -205,14 +205,14 @@ BenchResult run_match_benchmark(const std::string& name, bool /*shallow*/, bool 
     if (instrument) {
         for (int i = 0; i < MEASURED_OPS; ++i) {
             uint64_t t0 = cycle_now();
-            book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);
+            book.submit(Side::BUY, OrderType::IOC, TOUCH_ASK, MATCH_QTY);
             uint64_t t1 = cycle_now();
 
             latencies_ns.push_back(cycles_to_ns(t1 - t0));
         }
     } else {
         for (int i = 0; i < MEASURED_OPS; ++i) {
-            book.submit(BUY, IOC, TOUCH_ASK, MATCH_QTY);
+            book.submit(Side::BUY, OrderType::IOC, TOUCH_ASK, MATCH_QTY);
         }
     }
     double total_seconds = elapsed_seconds(bench_start);

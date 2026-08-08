@@ -30,7 +30,7 @@ RouterConfig make_router_config(int64_t lot_size = 10,
     };
 }
 
-VenueConfig make_venue_config(VenueType type = LIT, double fee = 0.0, double impact = 0.0,
+VenueConfig make_venue_config(VenueType type = VenueType::LIT, double fee = 0.0, double impact = 0.0,
                                int64_t latency_us = 0) {
     return VenueConfig{
         .type = type,
@@ -74,10 +74,10 @@ protected:
     void seed_liquidity(Venue* venue, Side side, int64_t price, int64_t qty) {
         venue->route_order(OrderRequest{
             .order_id = 0,
-            .sender_type = MM,
+            .sender_type = SenderType::MM,
             .request_type = RequestType::ORDER,
             .side = side,
-            .order_type = LIMIT,
+            .order_type = OrderType::LIMIT,
             .price = price,
             .quantity = qty
         });
@@ -90,10 +90,10 @@ protected:
 
         router->submit_order(OrderRequest{
             .order_id = id,
-            .sender_type = SOR,
+            .sender_type = SenderType::SOR,
             .request_type = RequestType::ORDER,
             .side = side,
-            .order_type = LIMIT,
+            .order_type = OrderType::LIMIT,
             .price = price,
             .quantity = quantity
         });
@@ -145,7 +145,7 @@ protected:
     }
 
     bool confirm_venue_ready(Venue* venue, Side side, int64_t canary_price) {
-        seed_liquidity(venue, side == BUY ? SELL : BUY, canary_price, 10);
+        seed_liquidity(venue, side == Side::BUY ? Side::SELL : Side::BUY, canary_price, 10);
         return warm_up(side, canary_price);
     }
 
@@ -159,13 +159,13 @@ TEST_F(SmartOrderRouterTest, SufficientLiquidity_SingleVenue_FillsCompletely) {
     Venue* v1 = make_venue(1);
     start_all(make_router_config());
 
-    seed_liquidity(v1, SELL, 100, 1000);
-    ASSERT_TRUE(warm_up(BUY, 200));
+    seed_liquidity(v1, Side::SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
 
     ASSERT_TRUE(outcome.got_decision);
-    EXPECT_EQ(outcome.decision.side, BUY);
+    EXPECT_EQ(outcome.decision.side, Side::BUY);
     EXPECT_EQ(outcome.decision.quantity, 100);
 
     ASSERT_TRUE(outcome.completed);
@@ -175,17 +175,17 @@ TEST_F(SmartOrderRouterTest, SufficientLiquidity_SingleVenue_FillsCompletely) {
 }
 
 TEST_F(SmartOrderRouterTest, SplitsAcrossMultipleVenues_WhenImpactFavorsSpreading) {
-    VenueConfig cfg = make_venue_config(LIT, 0.0, 1.0);
+    VenueConfig cfg = make_venue_config(VenueType::LIT, 0.0, 1.0);
     Venue* v1 = make_venue(1, cfg);
     Venue* v2 = make_venue(2, cfg);
     start_all(make_router_config());
 
-    seed_liquidity(v1, SELL, 100, 100000);
-    seed_liquidity(v2, SELL, 100, 100000);
-    ASSERT_TRUE(confirm_venue_ready(v1, BUY, 50));
-    ASSERT_TRUE(confirm_venue_ready(v2, BUY, 50));
+    seed_liquidity(v1, Side::SELL, 100, 100000);
+    seed_liquidity(v2, Side::SELL, 100, 100000);
+    ASSERT_TRUE(confirm_venue_ready(v1, Side::BUY, 50));
+    ASSERT_TRUE(confirm_venue_ready(v2, Side::BUY, 50));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
 
     ASSERT_TRUE(outcome.completed);
     EXPECT_EQ(outcome.total_filled, 100);
@@ -199,7 +199,7 @@ TEST_F(SmartOrderRouterTest, NoLiquidityAnywhere_CompletesWithTimedOutAndNoFills
     make_venue(1);
     start_all(make_router_config());
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
 
     ASSERT_TRUE(outcome.got_decision);
     ASSERT_TRUE(outcome.completed);
@@ -213,10 +213,10 @@ TEST_F(SmartOrderRouterTest, PartialLiquidity_CompletesPartiallyFilledAndTimedOu
     Venue* v1 = make_venue(1);
     start_all(make_router_config(10, RoutingStrategy::DP_OPTIMAL, 2));
 
-    seed_liquidity(v1, SELL, 100, 60);
-    ASSERT_TRUE(warm_up(BUY, 200));
+    seed_liquidity(v1, Side::SELL, 100, 60);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100, std::chrono::seconds(10));
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100, std::chrono::seconds(10));
 
     ASSERT_TRUE(outcome.completed);
     EXPECT_EQ(outcome.total_filled, 50);
@@ -228,15 +228,15 @@ TEST_F(SmartOrderRouterTest, DecisionEventReflectsConsolidatedMidPrice) {
     Venue* v1 = make_venue(1);
     start_all(make_router_config());
 
-    seed_liquidity(v1, BUY, 95, 500);
-    seed_liquidity(v1, SELL, 105, 500);
-    ASSERT_TRUE(warm_up(BUY, 200));
-    ASSERT_TRUE(warm_up(SELL, 0));
+    seed_liquidity(v1, Side::BUY, 95, 500);
+    seed_liquidity(v1, Side::SELL, 105, 500);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
+    ASSERT_TRUE(warm_up(Side::SELL, 0));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 30);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 30);
 
     ASSERT_TRUE(outcome.got_decision);
-    EXPECT_EQ(outcome.decision.side, BUY);
+    EXPECT_EQ(outcome.decision.side, Side::BUY);
     EXPECT_EQ(outcome.decision.quantity, 30);
     EXPECT_DOUBLE_EQ(outcome.decision.price, 100.0);
 }
@@ -245,13 +245,13 @@ TEST_F(SmartOrderRouterTest, TwoIndependentOrders_TrackedSeparatelyByParentId) {
     Venue* v1 = make_venue(1);
     start_all(make_router_config());
 
-    seed_liquidity(v1, SELL, 100, 1000);
-    seed_liquidity(v1, BUY, 90, 1000);
-    ASSERT_TRUE(warm_up(BUY, 200));
-    ASSERT_TRUE(warm_up(SELL, 0));
+    seed_liquidity(v1, Side::SELL, 100, 1000);
+    seed_liquidity(v1, Side::BUY, 90, 1000);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
+    ASSERT_TRUE(warm_up(Side::SELL, 0));
 
-    RoutingOutcome buy_outcome = submit_and_drain(BUY, 200, 40);
-    RoutingOutcome sell_outcome = submit_and_drain(SELL, 0, 25);
+    RoutingOutcome buy_outcome = submit_and_drain(Side::BUY, 200, 40);
+    RoutingOutcome sell_outcome = submit_and_drain(Side::SELL, 0, 25);
 
     ASSERT_TRUE(buy_outcome.completed);
     EXPECT_EQ(buy_outcome.total_filled, 40);
@@ -264,14 +264,14 @@ TEST_F(SmartOrderRouterTest, TwoIndependentOrders_TrackedSeparatelyByParentId) {
 
 TEST_F(SmartOrderRouterTest, LatencyVenue_StillFillsThroughDelayedMarketDataAndFills) {
     constexpr int64_t kLatencyUs = 2'000;
-    Venue* v1 = make_venue(1, make_venue_config(LIT, 0.0, 0.0, kLatencyUs));
+    Venue* v1 = make_venue(1, make_venue_config(VenueType::LIT, 0.0, 0.0, kLatencyUs));
     start_all(make_router_config());
 
-    seed_liquidity(v1, SELL, 100, 1000);
-    ASSERT_TRUE(warm_up(BUY, 200));
+    seed_liquidity(v1, Side::SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
 
     auto start = std::chrono::steady_clock::now();
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
     auto elapsed = std::chrono::steady_clock::now() - start;
 
     ASSERT_TRUE(outcome.completed);
@@ -285,11 +285,11 @@ TEST_F(SmartOrderRouterTest, NaiveSplit_RoutesEntirelyToOneVenue) {
     Venue* v2 = make_venue(2);
     start_all(make_router_config(10, RoutingStrategy::NAIVE));
 
-    seed_liquidity(v1, SELL, 105, 1000);
-    seed_liquidity(v2, SELL, 100, 1000);
-    ASSERT_TRUE(warm_up(BUY, 100));
+    seed_liquidity(v1, Side::SELL, 105, 1000);
+    seed_liquidity(v2, Side::SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(Side::BUY, 100));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
 
     ASSERT_TRUE(outcome.completed);
     EXPECT_EQ(outcome.total_filled, 100);
@@ -305,13 +305,13 @@ TEST_F(SmartOrderRouterTest, ProportionalSplit_SpreadsAcrossVenuesDespiteWorsePr
     Venue* v2 = make_venue(2);
     start_all(make_router_config(10, RoutingStrategy::PROPORTIONAL));
 
-    seed_liquidity(v1, SELL, 105, 1000);
-    seed_liquidity(v2, SELL, 100, 1000);
-    ASSERT_TRUE(warm_up(BUY, 200));
+    seed_liquidity(v1, Side::SELL, 105, 1000);
+    seed_liquidity(v2, Side::SELL, 100, 1000);
+    ASSERT_TRUE(warm_up(Side::BUY, 200));
 
-    ASSERT_TRUE(wait_until_both_venues_fill(BUY, 200, 20));
+    ASSERT_TRUE(wait_until_both_venues_fill(Side::BUY, 200, 20));
 
-    RoutingOutcome outcome = submit_and_drain(BUY, 200, 100);
+    RoutingOutcome outcome = submit_and_drain(Side::BUY, 200, 100);
 
     ASSERT_TRUE(outcome.completed);
     EXPECT_EQ(outcome.total_filled, 100);

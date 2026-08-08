@@ -15,7 +15,7 @@ void LimitOrderBook::ensure_pool_capacity(int64_t order_index) {
 }
 
 PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
-    if (side == SELL) {
+    if (side == Side::SELL) {
         if (best_ask >= ask_ladder_lower && best_ask <= ask_ladder_higher) {
             return ask_ladder[best_ask & MASK_MODULO];
         }
@@ -37,7 +37,7 @@ PriceLevel& LimitOrderBook::get_best_price_level(Side side) {
 }
 
 bool valid_price(Side side, int64_t book_best_price, int64_t order_price) {
-    if (side == BUY) {
+    if (side == Side::BUY) {
         if (order_price >= book_best_price) {return true;}
         return false;
     } else {
@@ -51,7 +51,7 @@ void LimitOrderBook::remove_price_level(Side side, int64_t price) {
     int64_t word_index = global_index / 64;
     int64_t bit_index = global_index % 64;
 
-    if (side == SELL) {
+    if (side == Side::SELL) {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
             ask_bitmask[word_index] &= ~(1ULL << bit_index);
         } else {
@@ -108,7 +108,7 @@ void LimitOrderBook::find_next_best_ask() {
 
                 } else {
                     if (ask_bitmask[next_word_index] != 0) {
-                        int next_local_bit = std::countr_zero(static_cast<uint64_t>(ask_bitmask[next_word_index]));
+                        int next_local_bit = std::countr_zero(ask_bitmask[next_word_index]);
                         best_ask = ask_ladder[next_word_index * 64 + next_local_bit].price;
                         overflow = false;
                         break;
@@ -170,7 +170,7 @@ void LimitOrderBook::find_next_best_bid() {
 
                 } else {
                     if (bid_bitmask[next_word_index] != 0) {
-                        int next_local_bit = 63 - std::countl_zero(static_cast<uint64_t>(bid_bitmask[next_word_index]));
+                        int next_local_bit = 63 - std::countl_zero(bid_bitmask[next_word_index]);
                         best_bid = bid_ladder[next_word_index * 64 + next_local_bit].price;
                         overflow = false;
                         break;
@@ -206,7 +206,7 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
     ensure_pool_capacity(order_index);
     global_order_pool[order_index] = order;
 
-    if (side == SELL) {
+    if (side == Side::SELL) {
         if (price < best_ask) {
             best_ask = price;
             int64_t trigger_zone = LADDER_DEPTH * 10 / 100;
@@ -226,7 +226,7 @@ void LimitOrderBook::add_to_price_level(Side side, int64_t price, int64_t quanti
 
     PriceLevel* price_level = nullptr;
 
-    if (side == SELL) {
+    if (side == Side::SELL) {
         if (price >= ask_ladder_lower && price <= ask_ladder_higher) {
             price_level = &ask_ladder[global_index];
             ask_bitmask[word_index] |= 1ULL << bit_index;
@@ -394,9 +394,9 @@ void LimitOrderBook::evict_bid_range(int64_t low_price, int64_t high_price) {
 }
 
 std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t price, int64_t quantity) {
-    Side target_side = (side == BUY) ? SELL : BUY;
+    Side target_side = (side == Side::BUY) ? Side::SELL : Side::BUY;
 
-    if (type == FOK) {
+    if (type == OrderType::FOK) {
         int64_t liquidity = available_liquidity(side, price);
         if (liquidity < quantity) { return std::vector<Fill>{}; }
     }
@@ -405,11 +405,11 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
 
     int64_t remaining_quantity = quantity;
     while (remaining_quantity > 0) {
-        if (side == BUY && best_ask == INT64_MAX) break;
-        if (side == SELL && best_bid == 0) break;
+        if (side == Side::BUY && best_ask == INT64_MAX) break;
+        if (side == Side::SELL && best_bid == 0) break;
 
         PriceLevel& next_price_level = get_best_price_level(target_side);
-        if (type != MARKET && !valid_price(side, next_price_level.price, price)) break;
+        if (type != OrderType::MARKET && !valid_price(side, next_price_level.price, price)) break;
 
         int64_t quantity_at_price_level = 0;
         while (remaining_quantity && next_price_level.quantity) {
@@ -447,7 +447,7 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
         }
     }
 
-    if (remaining_quantity && type == LIMIT) {
+    if (remaining_quantity && type == OrderType::LIMIT) {
         OrderID resting_order_id = generate_order_id(side, price);
         add_to_price_level(side, price, remaining_quantity, resting_order_id);
 
@@ -462,7 +462,7 @@ std::vector<Fill> LimitOrderBook::submit(Side side, OrderType type, int64_t pric
 
 OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
     uint64_t id = 0;
-    if (side == SELL) id |= (1ULL << 63);
+    if (side == Side::SELL) id |= (1ULL << 63);
     id |= (static_cast<uint64_t>(price) << 32);
     id |= static_cast<uint32_t>(next_order_index);
     next_order_index++;
@@ -471,7 +471,7 @@ OrderID LimitOrderBook::generate_order_id(Side side, int64_t price) {
 
 
 bool LimitOrderBook::cancel(OrderID id) {
-    Side side = (id & (1ULL << 63)) ? SELL : BUY;
+    Side side = (id & (1ULL << 63)) ? Side::SELL : Side::BUY;
     int64_t price = (id >> 32) & 0x7FFFFFFF;
     int64_t order_index = id & 0xFFFFFFFF;
 
@@ -484,7 +484,7 @@ bool LimitOrderBook::cancel(OrderID id) {
     int64_t global_index = price & MASK_MODULO;
     PriceLevel* price_level = nullptr;
 
-    if (side == BUY) {
+    if (side == Side::BUY) {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
             price_level = &bid_ladder[global_index];
         } else {
@@ -589,7 +589,7 @@ BookSnapshot LimitOrderBook::get_snapshot(int max_levels) const {
 int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) const {
     int64_t total_quantity = 0;
 
-    if (side == BUY) {
+    if (side == Side::BUY) {
         if (best_ask == INT64_MAX || worst_price < best_ask) {
             return 0; 
         }
@@ -667,7 +667,7 @@ int64_t LimitOrderBook::available_liquidity(Side side, int64_t worst_price) cons
 int64_t LimitOrderBook::get_quantity_at_price(Side side, int64_t price) const {
     int64_t global_index = price & MASK_MODULO;
 
-    if (side == BUY) {
+    if (side == Side::BUY) {
         if (price >= bid_ladder_lower && price <= bid_ladder_higher) {
             return bid_ladder[global_index].quantity;
         }
@@ -715,7 +715,7 @@ void LimitOrderBook::apply_delta(const BookDelta& delta) {
     int64_t word_index = global_index / 64;
     int64_t bit_index = global_index % 64;
 
-    if (side == SELL) { // update asks
+    if (side == Side::SELL) { // update asks
         bool in_window = (price >= ask_ladder_lower && price <= ask_ladder_higher);
 
         if (new_quantity == 0) {

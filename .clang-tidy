@@ -1,0 +1,14 @@
+---
+Checks: >
+  -*,
+  bugprone-*,
+  performance-*,
+  portability-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-exception-escape,
+  -bugprone-branch-clone
+
+HeaderFilterRegex: '.*/(include|src)/.*\.h$'
+WarningsAsErrors: ''
+FormatStyle: file

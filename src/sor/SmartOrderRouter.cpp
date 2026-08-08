@@ -47,7 +47,7 @@ double SmartOrderRouter::compute_consolidated_mid() const {
     int64_t best_ask = std::numeric_limits<int64_t>::max();
 
     for (const auto& vs : venue_states) {
-        if (vs.config.type != LIT) continue;
+        if (vs.config.type != VenueType::LIT) continue;
         best_bid = std::max(best_bid, vs.get_best_bid());
         best_ask = std::min(best_ask, vs.get_best_ask());
     }
@@ -211,7 +211,7 @@ void SmartOrderRouter::process_fill(const FillEvent& fill) {
         });
     }
 
-    if (fill.status == FILLED || fill.status == CANCELLED) {
+    if (fill.status == OrderStatus::FILLED || fill.status == OrderStatus::CANCELLED) {
 
         bool order_finished = false;
         bool timed_out = false;
@@ -351,10 +351,10 @@ int64_t SmartOrderRouter::execute_routing_decision(const ParentOrder& parent, co
             OrderRequest child_req;
             child_req.order_id = child_id;
             child_req.side = parent.side;
-            child_req.order_type = IOC;
+            child_req.order_type = OrderType::IOC;
             child_req.price = parent.price;
             child_req.quantity = allocated_qty;
-            child_req.sender_type = SOR;
+            child_req.sender_type = SenderType::SOR;
             child_req.request_type = RequestType::ORDER;
 
             venues[target_venue]->route_order(child_req);

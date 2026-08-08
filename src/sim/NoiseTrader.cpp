@@ -30,7 +30,7 @@ void NoiseTrader::execute_noise_order(double current_fair_value) {
 
     std::bernoulli_distribution direction(buy_prob);
     
-    Side side = direction(rng) ? BUY : SELL;
+    Side side = direction(rng) ? Side::BUY : Side::SELL;
     
     int64_t quantity = static_cast<int64_t>(std::round(size_dist(rng)));
     quantity = std::max<int64_t>(1, quantity);

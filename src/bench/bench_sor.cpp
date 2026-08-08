@@ -122,8 +122,8 @@ struct VenueFixture {
 
 void seed_book(LimitOrderBook& book) {
     for (int64_t i = 0; i < DEPTH_LEVELS; ++i) {
-        book.submit(SELL, LIMIT, TOUCH_ASK + i, LEVEL_QTY);
-        book.submit(BUY, LIMIT, TOUCH_BID - i, LEVEL_QTY);
+        book.submit(Side::SELL, OrderType::LIMIT, TOUCH_ASK + i, LEVEL_QTY);
+        book.submit(Side::BUY, OrderType::LIMIT, TOUCH_BID - i, LEVEL_QTY);
     }
 }
 
@@ -203,7 +203,7 @@ BenchResult run_split_benchmark(const std::string& name, RoutingStrategy strateg
 
     double sink = 0.0;
     for (int i = 0; i < warmup_ops; ++i) {
-        SplitResult r = (engine.*fn)(total_size, BUY, WORST_PRICE, venues);
+        SplitResult r = (engine.*fn)(total_size, Side::BUY, WORST_PRICE, venues);
         sink += static_cast<double>(r.allocations.front());
     }
 
@@ -215,7 +215,7 @@ BenchResult run_split_benchmark(const std::string& name, RoutingStrategy strateg
         for (int i = 0; i < measured_ops; ++i) {
             uint64_t t0 = cycle_now();
             {
-                SplitResult r = (engine.*fn)(total_size, BUY, WORST_PRICE, venues);
+                SplitResult r = (engine.*fn)(total_size, Side::BUY, WORST_PRICE, venues);
                 sink += static_cast<double>(r.allocations.front());
             }
             uint64_t t1 = cycle_now();
@@ -224,7 +224,7 @@ BenchResult run_split_benchmark(const std::string& name, RoutingStrategy strateg
         }
     } else {
         for (int i = 0; i < measured_ops; ++i) {
-            SplitResult r = (engine.*fn)(total_size, BUY, WORST_PRICE, venues);
+            SplitResult r = (engine.*fn)(total_size, Side::BUY, WORST_PRICE, venues);
             sink += static_cast<double>(r.allocations.front());
         }
     }

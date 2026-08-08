@@ -27,7 +27,7 @@ protected:
         engine.stop();
     }
 
-    void push_trade(VenueID venue, Side side, int64_t price, int64_t qty, double ts, SenderType sender = MM) {
+    void push_trade(VenueID venue, Side side, int64_t price, int64_t qty, double ts, SenderType sender = SenderType::MM) {
         engine.get_trade_inbox()->push(TradeEvent{
             .venue_id = venue,
             .side = side,
@@ -68,7 +68,7 @@ protected:
         engine.get_order_inbox()->push(OrderLifecycleEvent{
             .type = OrderEventType::COMPLETION,
             .parent_id = parent,
-            .side = BUY,
+            .side = Side::BUY,
             .quantity = 0,
             .price = 0.0,
             .venue_id = 0,
@@ -101,7 +101,7 @@ protected:
 };
 
 TEST_F(AnalyticsEngineTest, Completion_NoFills_ReportsZeroFillRateAndFallsBackToDecisionPrice) {
-    push_decision(1, BUY, 100, 100.0, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
     push_completion(1, true, 1.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -114,8 +114,8 @@ TEST_F(AnalyticsEngineTest, Completion_NoFills_ReportsZeroFillRateAndFallsBackTo
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FullFill_BuySide_ComputesPositiveShortfallWhenOverpaying) {
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 100, 101.0, 1, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 100, 101.0, 1, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -128,8 +128,8 @@ TEST_F(AnalyticsEngineTest, Completion_FullFill_BuySide_ComputesPositiveShortfal
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FullFill_SellSide_ShortfallSignMatchesBuyForABadFill) {
-    push_decision(1, SELL, 100, 100.0, 0.0);
-    push_fill(1, SELL, 100, 99.0, 1, 0.0);
+    push_decision(1, Side::SELL, 100, 100.0, 0.0);
+    push_fill(1, Side::SELL, 100, 99.0, 1, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -140,8 +140,8 @@ TEST_F(AnalyticsEngineTest, Completion_FullFill_SellSide_ShortfallSignMatchesBuy
 }
 
 TEST_F(AnalyticsEngineTest, Completion_PartialFill_ComputesFractionalFillRate) {
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 40, 100.0, 1, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 40, 100.0, 1, 0.0);
     push_completion(1, true, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -151,7 +151,7 @@ TEST_F(AnalyticsEngineTest, Completion_PartialFill_ComputesFractionalFillRate) {
 }
 
 TEST_F(AnalyticsEngineTest, Completion_ZeroIntendedQuantity_FillRateIsZeroWithoutDivByZero) {
-    push_decision(1, BUY, 0, 100.0, 0.0);
+    push_decision(1, Side::BUY, 0, 100.0, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -161,9 +161,9 @@ TEST_F(AnalyticsEngineTest, Completion_ZeroIntendedQuantity_FillRateIsZeroWithou
 }
 
 TEST_F(AnalyticsEngineTest, Completion_FillsAcrossTwoVenues_AggregatesWeightedAvgPriceAndPerVenueBreakdown) {
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 60, 100.0, 1, 0.0);
-    push_fill(1, BUY, 40, 102.0, 2, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 60, 100.0, 1, 0.0);
+    push_fill(1, Side::BUY, 40, 102.0, 2, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -181,10 +181,10 @@ TEST_F(AnalyticsEngineTest, Completion_FillsAcrossTwoVenues_AggregatesWeightedAv
 }
 
 TEST_F(AnalyticsEngineTest, UnknownParentId_FillEvent_IsSilentlyIgnored) {
-    push_fill(999, BUY, 50, 100.0, 1, 0.0);
+    push_fill(999, Side::BUY, 50, 100.0, 1, 0.0);
 
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 100, 100.0, 1, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 100, 100.0, 1, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -197,8 +197,8 @@ TEST_F(AnalyticsEngineTest, UnknownParentId_FillEvent_IsSilentlyIgnored) {
 TEST_F(AnalyticsEngineTest, UnknownParentId_CompletionEvent_ProducesNoReportAndDoesNotBlockLaterOrders) {
     push_completion(999, false, 0.0);
 
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 100, 100.0, 1, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 100, 100.0, 1, 0.0);
     push_completion(1, false, 0.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -210,23 +210,23 @@ TEST_F(AnalyticsEngineTest, Trade_ArrivingBeforeAnyDecision_IsDroppedAndExcluded
     clock.advance(100.0);
     engine.set_clock(&clock);
 
-    push_trade(1, BUY, 99999, 1, -1.0);
+    push_trade(1, Side::BUY, 99999, 1, -1.0);
 
-    push_decision(1, BUY, 100, 100.0, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
 
-    push_decision(997, BUY, 1, 1.0, 0.0);
-    push_fill(997, BUY, 1, 1.0, 1, 0.0);
+    push_decision(997, Side::BUY, 1, 1.0, 0.0);
+    push_fill(997, Side::BUY, 1, 1.0, 1, 0.0);
     push_completion(997, true, 0.0);
     ASSERT_TRUE(wait_for_report(997));
 
-    push_trade(1, BUY, 105, 50, 1.0);
+    push_trade(1, Side::BUY, 105, 50, 1.0);
 
-    push_decision(998, BUY, 1, 1.0, 0.0);
-    push_fill(998, BUY, 1, 1.0, 1, 0.0);
+    push_decision(998, Side::BUY, 1, 1.0, 0.0);
+    push_fill(998, Side::BUY, 1, 1.0, 1, 0.0);
     push_completion(998, true, 0.0);
     ASSERT_TRUE(wait_for_report(998));
 
-    push_fill(1, BUY, 100, 101.0, 1, 1.0);
+    push_fill(1, Side::BUY, 100, 101.0, 1, 1.0);
     push_completion(1, false, 2.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -240,22 +240,22 @@ TEST_F(AnalyticsEngineTest, Trade_SORSelfTrade_ExcludedFromWindowVwap_ButMMTrade
     clock.advance(100.0);
     engine.set_clock(&clock);
 
-    push_decision(1, BUY, 100, 100.0, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
 
-    push_decision(997, BUY, 1, 1.0, 0.0);
-    push_fill(997, BUY, 1, 1.0, 1, 0.0);
+    push_decision(997, Side::BUY, 1, 1.0, 0.0);
+    push_fill(997, Side::BUY, 1, 1.0, 1, 0.0);
     push_completion(997, true, 0.0);
     ASSERT_TRUE(wait_for_report(997));
 
-    push_trade(1, BUY, 999, 50, 1.0, SOR);
-    push_trade(1, BUY, 105, 50, 1.0, MM);
+    push_trade(1, Side::BUY, 999, 50, 1.0, SenderType::SOR);
+    push_trade(1, Side::BUY, 105, 50, 1.0, SenderType::MM);
 
-    push_decision(998, BUY, 1, 1.0, 0.0);
-    push_fill(998, BUY, 1, 1.0, 1, 0.0);
+    push_decision(998, Side::BUY, 1, 1.0, 0.0);
+    push_fill(998, Side::BUY, 1, 1.0, 1, 0.0);
     push_completion(998, true, 0.0);
     ASSERT_TRUE(wait_for_report(998));
 
-    push_fill(1, BUY, 100, 101.0, 1, 1.0);
+    push_fill(1, Side::BUY, 100, 101.0, 1, 1.0);
     push_completion(1, false, 2.0);
 
     ASSERT_TRUE(wait_for_report(1));
@@ -267,8 +267,8 @@ TEST_F(AnalyticsEngineTest, Trade_SORSelfTrade_ExcludedFromWindowVwap_ButMMTrade
 TEST_F(AnalyticsEngineTest, Start_CalledTwice_DoesNotSpawnSecondWorkerOrCrash) {
     engine.start();
 
-    push_decision(1, BUY, 100, 100.0, 0.0);
-    push_fill(1, BUY, 100, 100.0, 1, 0.0);
+    push_decision(1, Side::BUY, 100, 100.0, 0.0);
+    push_fill(1, Side::BUY, 100, 100.0, 1, 0.0);
     push_completion(1, false, 0.0);
 
     EXPECT_TRUE(wait_for_report(1));

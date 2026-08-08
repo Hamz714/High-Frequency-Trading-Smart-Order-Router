@@ -33,7 +33,7 @@ NoiseTraderConfig make_noise_config() {
 
 VenueConfig make_venue_config() {
     return VenueConfig{
-        .type = LIT,
+        .type = VenueType::LIT,
         .fee_per_share = 0.0,
         .latency_us = 0,
         .impact_coefficient = 0.0,
@@ -68,10 +68,10 @@ protected:
     void seed_liquidity(Venue* venue, Side side, int64_t price, int64_t qty) {
         venue->route_order(OrderRequest{
             .order_id = 0,
-            .sender_type = MM,
+            .sender_type = SenderType::MM,
             .request_type = RequestType::ORDER,
             .side = side,
-            .order_type = LIMIT,
+            .order_type = OrderType::LIMIT,
             .price = price,
             .quantity = qty
         });
@@ -163,7 +163,7 @@ TEST_F(SimulationEngineTest, Update_DrivesMarketMakerToPostQuotes_WithoutExceedi
     ASSERT_EQ(deltas.size(), 6u);
     for (const BookDelta& d : deltas) {
         EXPECT_GT(d.new_quantity, 0);
-        if (d.side == BUY) {
+        if (d.side == Side::BUY) {
             EXPECT_LT(d.price, 1000);
         } else {
             EXPECT_GT(d.price, 1000);
@@ -173,8 +173,8 @@ TEST_F(SimulationEngineTest, Update_DrivesMarketMakerToPostQuotes_WithoutExceedi
 
 TEST_F(SimulationEngineTest, Update_DrivesNoiseTraderToConsumeSeededLiquidity) {
     Venue* venue = make_venue(1);
-    seed_liquidity(venue, BUY, 95, 1'000'000);
-    seed_liquidity(venue, SELL, 105, 1'000'000);
+    seed_liquidity(venue, Side::BUY, 95, 1'000'000);
+    seed_liquidity(venue, Side::SELL, 105, 1'000'000);
     drain_n(*md_queues[0], 2);
 
     make_engine(100.0, 0.0, 0.0, 0.001);
@@ -185,7 +185,7 @@ TEST_F(SimulationEngineTest, Update_DrivesNoiseTraderToConsumeSeededLiquidity) {
 
     bool saw_consumption = false;
     for (const BookDelta& d : deltas) {
-        if ((d.side == BUY && d.price == 95) || (d.side == SELL && d.price == 105)) {
+        if ((d.side == Side::BUY && d.price == 95) || (d.side == Side::SELL && d.price == 105)) {
             saw_consumption = true;
         }
     }

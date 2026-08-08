@@ -33,8 +33,8 @@ std::vector<ClientOrderSpec> generate_order_flow(uint32_t trial_seed, const SimC
     script.reserve(config.harness.orders_per_trial);
 
     for (int i = 0; i < config.harness.orders_per_trial; ++i) {
-        Side side = side_dist(rng) == 0 ? BUY : SELL;
-        int64_t price = side == BUY
+        Side side = side_dist(rng) == 0 ? Side::BUY : Side::SELL;
+        int64_t price = side == Side::BUY
             ? static_cast<int64_t>(config.market.reference_price) + kAggressiveOffsetTicks
             : static_cast<int64_t>(config.market.reference_price) - kAggressiveOffsetTicks;
 
@@ -389,7 +389,7 @@ void export_csv(const MonteCarloRunResult& result, const std::string& path) {
             out << row.trial << ","
                 << routing_strategy_tag(row.arm) << ","
                 << row.order_id << ","
-                << (row.side == BUY ? "BUY" : "SELL") << ","
+                << (row.side == Side::BUY ? "BUY" : "SELL") << ","
                 << row.intended_size << ","
                 << row.filled_size << ","
                 << row.fill_rate << ","

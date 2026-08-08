@@ -29,7 +29,7 @@ protected:
 
     void start(const NoiseTraderConfig& cfg, double initial_price, uint32_t seed = 42) {
         VenueConfig vcfg{
-            .type = LIT,
+            .type = VenueType::LIT,
             .fee_per_share = 0.0,
             .latency_us = 0,
             .impact_coefficient = 0.0,
@@ -44,10 +44,10 @@ protected:
     void seed_liquidity(Side side, int64_t price, int64_t qty) {
         venue->route_order(OrderRequest{
             .order_id = 0,
-            .sender_type = MM,
+            .sender_type = SenderType::MM,
             .request_type = RequestType::ORDER,
             .side = side,
-            .order_type = LIMIT,
+            .order_type = OrderType::LIMIT,
             .price = price,
             .quantity = qty
         });
@@ -99,8 +99,8 @@ protected:
 TEST_F(NoiseTraderTest, Update_OnlyMatchesExistingLiquidity_NeverRests) {
     start(make_noise_config(20.0, std::log(50.0), 0.3, 0.0), 100.0);
 
-    seed_liquidity(BUY, 95, 1'000'000);
-    seed_liquidity(SELL, 105, 1'000'000);
+    seed_liquidity(Side::BUY, 95, 1'000'000);
+    seed_liquidity(Side::SELL, 105, 1'000'000);
     drain_seed_deltas(2);
 
     trader->update(0.5, 100.0);
@@ -108,7 +108,7 @@ TEST_F(NoiseTraderTest, Update_OnlyMatchesExistingLiquidity_NeverRests) {
 
     ASSERT_FALSE(deltas.empty());
     for (const BookDelta& d : deltas) {
-        if (d.side == BUY) {
+        if (d.side == Side::BUY) {
             EXPECT_EQ(d.price, 95);
         } else {
             EXPECT_EQ(d.price, 105);
@@ -120,38 +120,38 @@ TEST_F(NoiseTraderTest, Update_OnlyMatchesExistingLiquidity_NeverRests) {
 TEST_F(NoiseTraderTest, Update_StrongPositiveTrend_FirstOrderIsBuy) {
     start(make_noise_config(20.0, std::log(50.0), 0.3, 1000.0), 100.0);
 
-    seed_liquidity(BUY, 95, 1'000'000);
-    seed_liquidity(SELL, 105, 1'000'000);
+    seed_liquidity(Side::BUY, 95, 1'000'000);
+    seed_liquidity(Side::SELL, 105, 1'000'000);
     drain_seed_deltas(2);
 
     BookDelta first;
     ASSERT_TRUE(fire_next_order(200.0, first));
-    EXPECT_EQ(first.side, SELL);
+    EXPECT_EQ(first.side, Side::SELL);
     EXPECT_EQ(first.price, 105);
 }
 
 TEST_F(NoiseTraderTest, Update_StrongNegativeTrend_FirstOrderIsSell) {
     start(make_noise_config(20.0, std::log(50.0), 0.3, 1000.0), 100.0);
 
-    seed_liquidity(BUY, 95, 1'000'000);
-    seed_liquidity(SELL, 105, 1'000'000);
+    seed_liquidity(Side::BUY, 95, 1'000'000);
+    seed_liquidity(Side::SELL, 105, 1'000'000);
     drain_seed_deltas(2);
 
     BookDelta first;
     ASSERT_TRUE(fire_next_order(50.0, first));
-    EXPECT_EQ(first.side, BUY);
+    EXPECT_EQ(first.side, Side::BUY);
     EXPECT_EQ(first.price, 95);
 }
 
 TEST_F(NoiseTraderTest, Update_LargeOrderExhaustsSmallRestingLiquidity_WithoutResting) {
     start(make_noise_config(20.0, std::log(10000.0), 0.01, 1000.0), 100.0);
 
-    seed_liquidity(SELL, 105, 500);
+    seed_liquidity(Side::SELL, 105, 500);
     drain_seed_deltas(1);
 
     BookDelta first;
     ASSERT_TRUE(fire_next_order(200.0, first));
-    EXPECT_EQ(first.side, SELL);
+    EXPECT_EQ(first.side, Side::SELL);
     EXPECT_EQ(first.price, 105);
     EXPECT_EQ(first.new_quantity, 0);
 
@@ -162,8 +162,8 @@ TEST_F(NoiseTraderTest, Update_LargeOrderExhaustsSmallRestingLiquidity_WithoutRe
 TEST_F(NoiseTraderTest, Update_QuantityIsApproximatelyDeterministic_WhenSigmaIsTiny) {
     start(make_noise_config(20.0, std::log(100.0), 0.0001, 0.0), 100.0);
 
-    seed_liquidity(BUY, 95, 1'000'000);
-    seed_liquidity(SELL, 105, 1'000'000);
+    seed_liquidity(Side::BUY, 95, 1'000'000);
+    seed_liquidity(Side::SELL, 105, 1'000'000);
     drain_seed_deltas(2);
 
     BookDelta first;

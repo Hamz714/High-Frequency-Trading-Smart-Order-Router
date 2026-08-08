@@ -45,8 +45,8 @@ OrderRequest make_cancel(OrderID lob_order_id, SenderType sender) {
         .order_id = lob_order_id,
         .sender_type = sender,
         .request_type = RequestType::CANCEL,
-        .side = BUY,
-        .order_type = LIMIT,
+        .side = Side::BUY,
+        .order_type = OrderType::LIMIT,
         .price = 0,
         .quantity = 0
     };
@@ -61,7 +61,7 @@ protected:
 
     std::unique_ptr<Venue> venue;
 
-    void make_venue(VenueType type = LIT) {
+    void make_venue(VenueType type = VenueType::LIT) {
         venue = std::make_unique<Venue>(1, make_config(type));
         venue->set_sor_queues(&market_data_queue, &sor_fill_queue);
         venue->set_mm_fill_queue(&mm_fill_queue);
@@ -70,7 +70,7 @@ protected:
     }
 
     void make_latency_venue(int64_t latency_us, bool simulate_latency = true) {
-        venue = std::make_unique<Venue>(1, make_config(LIT, latency_us), simulate_latency);
+        venue = std::make_unique<Venue>(1, make_config(VenueType::LIT, latency_us), simulate_latency);
         venue->set_sor_queues(&market_data_queue, &sor_fill_queue);
         venue->set_mm_fill_queue(&mm_fill_queue);
         venue->set_analytics_queue(&analytics_queue);
@@ -83,16 +83,16 @@ protected:
 };
 
 TEST_F(VenueTest, Accessors_ReturnConstructedValues) {
-    make_venue(LIT);
+    make_venue(VenueType::LIT);
 
     EXPECT_EQ(venue->get_id(), 1);
-    EXPECT_EQ(venue->get_type(), LIT);
-    EXPECT_EQ(venue->get_config().type, LIT);
+    EXPECT_EQ(venue->get_type(), VenueType::LIT);
+    EXPECT_EQ(venue->get_config().type, VenueType::LIT);
 }
 
 TEST_F(VenueTest, RouteOrder_SOR_RestingLimit_PublishesZeroFillPartialStatus) {
     make_venue();
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
@@ -101,16 +101,16 @@ TEST_F(VenueTest, RouteOrder_SOR_RestingLimit_PublishesZeroFillPartialStatus) {
     EXPECT_EQ(fe.filled_quantity, 0);
     EXPECT_EQ(fe.fill_price, 100);
     EXPECT_EQ(fe.remaining_quantity, 10);
-    EXPECT_EQ(fe.status, PARTIAL);
+    EXPECT_EQ(fe.status, OrderStatus::PARTIAL);
 }
 
 TEST_F(VenueTest, RouteOrder_SOR_FullMatch_PublishesFilledStatus) {
     make_venue();
-    venue->route_order(make_order(1, MM, SELL, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::MM, Side::SELL, OrderType::LIMIT, 100, 10));
     FillEvent mm_fe;
     ASSERT_TRUE(wait_pop(mm_fill_queue, mm_fe));
 
-    venue->route_order(make_order(2, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(2, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
@@ -118,53 +118,53 @@ TEST_F(VenueTest, RouteOrder_SOR_FullMatch_PublishesFilledStatus) {
     EXPECT_EQ(fe.filled_quantity, 10);
     EXPECT_EQ(fe.fill_price, 100);
     EXPECT_EQ(fe.remaining_quantity, 0);
-    EXPECT_EQ(fe.status, FILLED);
+    EXPECT_EQ(fe.status, OrderStatus::FILLED);
     EXPECT_EQ(fe.lob_order_id, -1);
 }
 
 TEST_F(VenueTest, RouteOrder_SOR_PartialMatchThenRest_SecondEventCarriesRestingId) {
     make_venue();
-    venue->route_order(make_order(1, MM, SELL, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::MM, Side::SELL, OrderType::LIMIT, 100, 10));
     FillEvent mm_fe;
     ASSERT_TRUE(wait_pop(mm_fill_queue, mm_fe));
 
-    venue->route_order(make_order(2, SOR, BUY, LIMIT, 100, 30));
+    venue->route_order(make_order(2, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 30));
 
     FillEvent match_fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, match_fe));
     EXPECT_EQ(match_fe.filled_quantity, 10);
     EXPECT_EQ(match_fe.remaining_quantity, 20);
-    EXPECT_EQ(match_fe.status, PARTIAL);
+    EXPECT_EQ(match_fe.status, OrderStatus::PARTIAL);
 
     FillEvent rest_fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, rest_fe));
     EXPECT_EQ(rest_fe.filled_quantity, 0);
     EXPECT_EQ(rest_fe.remaining_quantity, 20);
-    EXPECT_EQ(rest_fe.status, PARTIAL);
+    EXPECT_EQ(rest_fe.status, OrderStatus::PARTIAL);
     EXPECT_NE(rest_fe.lob_order_id, -1);
     EXPECT_EQ(rest_fe.lob_order_id, match_fe.lob_order_id);
 }
 
 TEST_F(VenueTest, RouteOrder_SOR_FOK_Unfillable_PublishesCancelledWithFullRemaining) {
     make_venue();
-    venue->route_order(make_order(1, SOR, BUY, FOK, 100, 20));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::FOK, 100, 20));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
     EXPECT_EQ(fe.filled_quantity, 0);
     EXPECT_EQ(fe.remaining_quantity, 20);
-    EXPECT_EQ(fe.status, CANCELLED);
+    EXPECT_EQ(fe.status, OrderStatus::CANCELLED);
     EXPECT_EQ(fe.lob_order_id, -1);
 }
 
 TEST_F(VenueTest, RouteOrder_MM_PublishesToMmQueueOnly) {
     make_venue();
-    venue->route_order(make_order(1, MM, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::MM, Side::BUY, OrderType::LIMIT, 100, 10));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(mm_fill_queue, fe));
     EXPECT_EQ(fe.child_id, 1);
-    EXPECT_EQ(fe.status, PARTIAL);
+    EXPECT_EQ(fe.status, OrderStatus::PARTIAL);
 
     FillEvent unused;
     EXPECT_FALSE(sor_fill_queue.try_pop(unused));
@@ -172,24 +172,24 @@ TEST_F(VenueTest, RouteOrder_MM_PublishesToMmQueueOnly) {
 
 TEST_F(VenueTest, RouteOrder_Cancel_RemovesRestingOrder) {
     make_venue();
-    venue->route_order(make_order(1, SOR, SELL, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::SELL, OrderType::LIMIT, 100, 10));
 
     FillEvent rest_fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, rest_fe));
     ASSERT_NE(rest_fe.lob_order_id, -1);
 
-    venue->route_order(make_cancel(rest_fe.lob_order_id, SOR));
-    venue->route_order(make_order(2, SOR, BUY, IOC, 100, 10));
+    venue->route_order(make_cancel(rest_fe.lob_order_id, SenderType::SOR));
+    venue->route_order(make_order(2, SenderType::SOR, Side::BUY, OrderType::IOC, 100, 10));
 
     FillEvent ioc_fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, ioc_fe));
     EXPECT_EQ(ioc_fe.filled_quantity, 0);
-    EXPECT_EQ(ioc_fe.status, CANCELLED);
+    EXPECT_EQ(ioc_fe.status, OrderStatus::CANCELLED);
 }
 
 TEST_F(VenueTest, RouteOrder_PublishesTradeEventOnMatch) {
     make_venue();
-    venue->route_order(make_order(1, MM, SELL, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::MM, Side::SELL, OrderType::LIMIT, 100, 10));
     FillEvent mm_fe;
     ASSERT_TRUE(wait_pop(mm_fill_queue, mm_fe));
 
@@ -197,22 +197,22 @@ TEST_F(VenueTest, RouteOrder_PublishesTradeEventOnMatch) {
     ASSERT_TRUE(wait_pop(analytics_queue, rest_trade));
     EXPECT_EQ(rest_trade.quantity, 0);
 
-    venue->route_order(make_order(2, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(2, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
     FillEvent sor_fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, sor_fe));
 
     TradeEvent match_trade;
     ASSERT_TRUE(wait_pop(analytics_queue, match_trade));
     EXPECT_EQ(match_trade.venue_id, venue->get_id());
-    EXPECT_EQ(match_trade.side, BUY);
+    EXPECT_EQ(match_trade.side, Side::BUY);
     EXPECT_EQ(match_trade.price, 100);
     EXPECT_EQ(match_trade.quantity, 10);
-    EXPECT_EQ(match_trade.sender_type, SOR);
+    EXPECT_EQ(match_trade.sender_type, SenderType::SOR);
 }
 
 TEST_F(VenueTest, DarkVenue_DoesNotPublishBookUpdates) {
-    make_venue(DARK);
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    make_venue(VenueType::DARK);
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
@@ -222,13 +222,13 @@ TEST_F(VenueTest, DarkVenue_DoesNotPublishBookUpdates) {
 }
 
 TEST_F(VenueTest, LitVenue_PublishesBookUpdateOnRest) {
-    make_venue(LIT);
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    make_venue(VenueType::LIT);
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     BookDelta delta;
     ASSERT_TRUE(wait_pop(market_data_queue, delta));
     EXPECT_EQ(delta.venue_id, venue->get_id());
-    EXPECT_EQ(delta.side, BUY);
+    EXPECT_EQ(delta.side, Side::BUY);
     EXPECT_EQ(delta.price, 100);
     EXPECT_EQ(delta.new_quantity, 10);
 }
@@ -239,7 +239,7 @@ TEST_F(VenueTest, RouteOrder_UsesClockForTradeTimestamp_WhenSet) {
     clock.advance(42.5);
     venue->set_clock(&clock);
 
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     TradeEvent trade;
     ASSERT_TRUE(wait_pop(analytics_queue, trade));
@@ -251,7 +251,7 @@ TEST_F(VenueTest, Latency_SorOrderHeldForOutboundLegThenFillStampedForInboundLeg
     make_latency_venue(kLatencyUs);
 
     int64_t routed_at = wire_now_ns();
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     FillEvent fe;
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe));
@@ -267,7 +267,7 @@ TEST_F(VenueTest, Latency_MarketDataStampedOneLatencyIntoTheFuture) {
     make_latency_venue(kLatencyUs);
 
     int64_t routed_at = wire_now_ns();
-    venue->route_order(make_order(1, MM, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::MM, Side::BUY, OrderType::LIMIT, 100, 10));
 
     BookDelta delta;
     ASSERT_TRUE(wait_pop(market_data_queue, delta));
@@ -279,8 +279,8 @@ TEST_F(VenueTest, Latency_MarketDataStampedOneLatencyIntoTheFuture) {
 TEST_F(VenueTest, Latency_LocalParticipantsNotDelayedBehindInFlightSorOrder) {
     make_latency_venue(100'000);
 
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
-    venue->route_order(make_order(2, MM, SELL, LIMIT, 200, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
+    venue->route_order(make_order(2, SenderType::MM, Side::SELL, OrderType::LIMIT, 200, 10));
 
     FillEvent mm_fe;
     ASSERT_TRUE(wait_pop(mm_fill_queue, mm_fe));
@@ -296,7 +296,7 @@ TEST_F(VenueTest, Latency_DisabledDeliversImmediately) {
     make_latency_venue(5'000'000, /*simulate_latency=*/false);
 
     FillEvent fe;
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     ASSERT_TRUE(wait_pop(sor_fill_queue, fe, std::chrono::milliseconds(1000)));
     EXPECT_EQ(fe.child_id, 1);
@@ -305,7 +305,7 @@ TEST_F(VenueTest, Latency_DisabledDeliversImmediately) {
 
 TEST_F(VenueTest, RouteOrder_TradeTimestampDefaultsToZero_WithoutClock) {
     make_venue();
-    venue->route_order(make_order(1, SOR, BUY, LIMIT, 100, 10));
+    venue->route_order(make_order(1, SenderType::SOR, Side::BUY, OrderType::LIMIT, 100, 10));
 
     TradeEvent trade;
     ASSERT_TRUE(wait_pop(analytics_queue, trade));

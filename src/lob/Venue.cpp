@@ -1,10 +1,10 @@
 #include "lob/Venue.h"
 
-Venue::Venue(int id, const VenueConfig& cfg, bool simulate_latency, size_t order_pool_capacity,
+Venue::Venue(int id, const VenueConfig& cfg, bool simulate_latency_in, size_t order_pool_capacity,
              size_t inbox_capacity):
-    venue_id(id), config(cfg), simulate_latency(simulate_latency), lob(order_pool_capacity),
+    venue_id(id), config(cfg), simulate_latency(simulate_latency_in), lob(order_pool_capacity),
     inbox(inbox_capacity) {
-    if (config.type == LIT) {
+    if (config.type == VenueType::LIT) {
         lob.on_book_update(book_update_publisher);
     }
 }
@@ -136,7 +136,7 @@ void Venue::process_request(const OrderRequest& req) {
 
         if (fills.empty()) {
             sor_fill_queue->push({
-                req.order_id, -1, venue_id, 0, 0, running_remaining, CANCELLED, visible_ns
+                req.order_id, -1, venue_id, 0, 0, running_remaining, OrderStatus::CANCELLED, visible_ns
             });
             return;
         }
@@ -170,7 +170,7 @@ void Venue::process_request(const OrderRequest& req) {
 
         if (fills.empty()) {
             mm_fill_queue->push({
-                req.order_id, -1, venue_id, 0, 0, running_remaining, PARTIAL
+                req.order_id, -1, venue_id, 0, 0, running_remaining, OrderStatus::PARTIAL
             });
             return;
         }
@@ -181,7 +181,7 @@ void Venue::process_request(const OrderRequest& req) {
             OrderStatus current_status = OrderStatus::PARTIAL;
 
             if (i == fills.size() - 1) {
-                current_status = (running_remaining == 0) ? OrderStatus::FILLED : PARTIAL;
+                current_status = (running_remaining == 0) ? OrderStatus::FILLED : OrderStatus::PARTIAL;
             }
 
             mm_fill_queue->push({

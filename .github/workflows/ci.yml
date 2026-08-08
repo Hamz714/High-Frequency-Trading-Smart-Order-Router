@@ -34,6 +34,28 @@ jobs:
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
 
+  clang-tidy:
+    name: Linux / clang-tidy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy
+
+      - name: Configure
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+          -DBUILD_TESTS=OFF
+
+      - name: Run clang-tidy
+        run: >
+          git ls-files 'src/*.cpp'
+          | xargs -P 4 -I{} clang-tidy -p build --warnings-as-errors='*' --quiet {}
+
   sanitizers:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest

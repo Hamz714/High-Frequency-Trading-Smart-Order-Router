@@ -24,8 +24,8 @@ class LimitOrderBook {
     int64_t best_bid = 0;
     int64_t best_ask = std::numeric_limits<int64_t>::max();
 
-    std::array<int64_t, LADDER_DEPTH/64> bid_bitmask{};
-    std::array<int64_t, LADDER_DEPTH/64> ask_bitmask{};
+    std::array<uint64_t, LADDER_DEPTH/64> bid_bitmask{};
+    std::array<uint64_t, LADDER_DEPTH/64> ask_bitmask{};
 
     std::map<int64_t, PriceLevel, std::greater<int64_t>> bid_overflow;
     std::map<int64_t, PriceLevel> ask_overflow;

@@ -13,9 +13,9 @@ endif()
 
 add_library(hft_warnings INTERFACE)
 if(MSVC)
-    target_compile_options(hft_warnings INTERFACE /W4)
+    target_compile_options(hft_warnings INTERFACE /W4 /permissive-)
 else()
-    target_compile_options(hft_warnings INTERFACE -Wall -Wextra)
+    target_compile_options(hft_warnings INTERFACE -Wall -Wextra -Wpedantic -Wshadow)
 endif()
 
 file(GLOB_RECURSE CORE_SOURCES CONFIGURE_DEPENDS src/*.cpp)

@@ -18,7 +18,7 @@ struct VenueState {
     const LimitOrderBook* local_lob;
 
     int64_t get_visible_liquidity(Side side, int64_t worst_price) const {
-        if (!local_lob || config.type == DARK) return 0;
+        if (!local_lob || config.type == VenueType::DARK) return 0;
         return local_lob->available_liquidity(side, worst_price); 
     }
 
@@ -28,12 +28,12 @@ struct VenueState {
     }
 
     int64_t get_best_bid() const {
-        if (!local_lob || config.type == DARK) return 0;
+        if (!local_lob || config.type == VenueType::DARK) return 0;
         return local_lob->get_best_bid();
     }
 
     int64_t get_best_ask() const {
-        if (!local_lob || config.type == DARK) return std::numeric_limits<int64_t>::max();
+        if (!local_lob || config.type == VenueType::DARK) return std::numeric_limits<int64_t>::max();
         return local_lob->get_best_ask();
     }
 };
@@ -69,7 +69,7 @@ class Venue {
     int64_t stamp_publication() const;
 
     public:
-        Venue(int id, const VenueConfig& cfg, bool simulate_latency = true,
+        Venue(int id, const VenueConfig& cfg, bool simulate_latency_in = true,
               size_t order_pool_capacity = DEFAULT_ORDER_POOL_CAPACITY,
               size_t inbox_capacity = DEFAULT_QUEUE_CAPACITY);
         ~Venue();
