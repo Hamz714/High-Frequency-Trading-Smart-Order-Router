@@ -250,6 +250,11 @@ TEST_F(AnalyticsEngineTest, Trade_SORSelfTrade_ExcludedFromWindowVwap_ButMMTrade
     push_trade(1, BUY, 999, 50, 1.0, SOR);
     push_trade(1, BUY, 105, 50, 1.0, MM);
 
+    push_decision(998, BUY, 1, 1.0, 0.0);
+    push_fill(998, BUY, 1, 1.0, 1, 0.0);
+    push_completion(998, true, 0.0);
+    ASSERT_TRUE(wait_for_report(998));
+
     push_fill(1, BUY, 100, 101.0, 1, 1.0);
     push_completion(1, false, 2.0);
 
