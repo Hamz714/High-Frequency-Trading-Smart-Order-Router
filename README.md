@@ -16,6 +16,12 @@ because the naive one isolates the routing decision while the proportional one i
 the honest opponent. Venue latency is simulated, not just priced — a child order
 is held on the wire and quotes reach the router stale.
 
+Both halves of the hot path are measured on the same host with a `rdtsc`-based
+instrument that subtracts its own noise floor: the order book at **tens of nanoseconds
+per operation**, and the routing decision itself at **~163 µs for a 10,000-share
+parent**. The second number is the one that matters, and a book-only benchmark would
+have hidden it.
+
 [![CI](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml/badge.svg)](https://github.com/Hamz714/High-Frequency-Trading-Smart-Order-Router/actions/workflows/ci.yml)
 
 ---
@@ -58,12 +64,13 @@ ground under load to overflow an 8,192-deep ring — not a property of any routi
 strategy. The counters exist so that a run which does drop can be identified and
 discarded rather than quietly averaged in.
 
-### What simulating latency changed
+### What the latency model costs
 
-Turning the latency model on costs a measurable round trip and, on this
-simulator, changes execution quality by nothing measurable. Paired per-order
-comparison, 600 orders per arm, each order matched against itself in the
-identical seeded market:
+`--no-latency` disables the simulated delay while leaving the DP's cost function
+untouched, which makes the effect of the model directly measurable. Turning it on
+costs a real round trip and, on this simulator, changes execution quality by nothing
+measurable. Paired per-order comparison, 600 orders per arm, each order matched
+against itself in the identical seeded market:
 
 | Metric (SOR arm) | Latency on | Latency off | Paired delta | |
 |---|---:|---:|---:|---|
@@ -96,8 +103,8 @@ therefore adds symmetric price risk, not adverse selection. Adverse selection
 requires a counterparty who knows something the router does not, and modelling
 that — flow whose arrival correlates with the price process's next move — is the
 prerequisite for the latency term in the cost function to earn its keep. The
-mechanism is now in place and measurably working; the toxic flow that would make
-it bite is not yet.
+mechanism is in place and measurably working; the toxic flow that would make it
+bite is what the simulator still lacks.
 
 ### Order book microbenchmark
 
@@ -105,9 +112,9 @@ Single-threaded, 50k measured ops per scenario, no routing or threading involved
 Each scenario runs twice per repeat: an **uninstrumented** pass that produces the
 throughput figure, and an **instrumented** pass that produces the percentiles. The
 two are separated so per-op timer reads never land inside the throughput
-denominator. Both are medians of 9 runs, with the observed range — a single pass on
-a laptop is noisy enough that the ladder/overflow ratio can invert, so the tool
-repeats and aggregates by default.
+denominator. Both figures are medians of 9 runs, reported with the observed range:
+a single pass on a laptop is noisy enough that the ladder/overflow ratio can invert,
+so the tool repeats and aggregates by default.
 
 Timing uses a calibrated `rdtsc` counter fenced with `lfence` on x86-64, falling
 back to `steady_clock` elsewhere. The thread is pinned to one core, and the harness
@@ -149,22 +156,17 @@ on Linux and 9.0x on Windows, ranges disjoint on both. The insert ratio is weake
 2.9x with disjoint ranges on Linux, but 1.7x with *overlapping* ranges on Windows, so
 treat insert as directional and cancel as the solid result.
 
-**Why these numbers differ from earlier revisions.** A previous version of this table
-reported 9.09 M / 18.71 M / 10.10 M ops/sec with percentiles quantised to a 100 ns
-grid. Two `steady_clock` reads sat inside the timed loop and were being counted as
-part of each operation. On Windows `steady_clock` *ticks* at 100 ns but *costs* ~25 ns
-to read, so that instrumentation was charged to the book on every op — understating
-throughput across the board, and understating cancel-in-ladder by more than 6x, since
-a ~50 ns tax swamps a ~4 ns operation. It also flattened the ladder-vs-overflow cancel
-ratio to an apparent 1.5x, hiding the design property the benchmark exists to show.
+**The two passes cross-check each other.** Throughput and the floor-corrected p50 are
+independent estimates of the same quantity — one derived from a loop with no timer in
+it, the other from per-op reads with the measured floor subtracted — so their agreement
+is a check on the instrument rather than on the book. They agree to within 27% on every
+scenario on both platforms, and to within 10% on most.
 
-Throughput and the floor-corrected p50 are now independent estimates of the same
-quantity, and they agree within 10–27% on every scenario on both platforms — a
-consistency check the old numbers failed badly. The exception is cancel-in-ladder,
-where throughput implies ~4–6 ns/op against a corrected p50 of 9 ns: that operation
-is now *below the resolving power of the instrument*, since the fenced read pair costs
-~9 ns on its own. For that row the throughput column is the number to trust, and "under
-10 ns" is the strongest honest claim available without switching to batched timing.
+The exception is cancel-in-ladder, which is *below the resolving power of the
+instrument*: throughput implies ~4–6 ns/op against a corrected p50 of 9 ns, and the
+fenced read pair costs ~9 ns on its own. For that row the throughput column is the
+number to trust, and "under 10 ns" is the strongest honest claim available without
+switching to batched timing, which would trade away the tail percentiles.
 
 ### Routing decision microbenchmark
 
@@ -178,8 +180,10 @@ pass, medians of 9 runs.
 
 Sample counts fall as the work per call rises, so each row is budgeted to roughly the
 same total work rather than the same iteration count — 20,000 calls at the smallest
-size down to 400 at the largest. The tool prints the sample count per row and the CSV
-records it, so a percentile can be weighed against how many samples are behind it.
+size down to a floor of 400 at the largest. The tool prints that count in its `ops`
+column, so a percentile can be weighed against how many samples are behind it: the
+25,000-share p99 rests on 400 calls per run and should be read more loosely than the
+rows above it.
 
 | Parent size | W | decisions/sec | p50 | p95 | p99 | ns per `V·W²/2` |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -240,15 +244,14 @@ floor 9.6 ns p50 — the same host and build as the Windows book cross-check abo
 Raw data: [`results/baseline/sor_benchmark_windows.csv`](results/baseline/sor_benchmark_windows.csv).
 Reproduce with `./bench_sor` (or `./bench_sor --repeat 3 --lot-size 100`).
 
-**What this changes about the rest of the project.** The routing decision is three to
-four orders of magnitude more expensive than any book operation — a 10,000-share parent
-costs ~163 µs to decide against the ~56 ns it takes to insert an order on the same
-host, a factor of ~2,900 — and it is comparable to the
-modelled wire time it is competing with, since the slowest venue's simulated one-way
-latency is 202 µs. At the top of the configured size range the router spends about as
-long deciding where to send the order as the order spends in flight. `bench_lob` numbers
-are not the tick-to-trade story; this table is the part of it that is actually code
-executing.
+**Where the decision cost lands.** The routing decision is three to four orders of
+magnitude more expensive than any book operation — a 10,000-share parent costs ~163 µs
+to decide against the ~56 ns it takes to insert an order on the same host, a factor of
+~2,900 — and it is comparable to the modelled wire time it is competing with, since the
+slowest venue's simulated one-way latency is 202 µs. At the top of the configured size
+range the router spends about as long deciding where to send the order as the order
+spends in flight. `bench_lob` numbers are not the tick-to-trade story; this table is
+the part of it that is actually code executing.
 
 Two consequences worth naming. First, `compute_split` is called from both the
 client-order loop and, on a partial fill, from `process_fill` on the fill thread — where
@@ -258,9 +261,9 @@ parent.
 
 Second, **`lot_size` is a latency control, not just a rounding parameter, and nothing
 in the project currently treats it as one.** `W` is `size/lot_size`, so decision cost
-falls roughly quadratically as the lot gets coarser. Re-running the sweep confirms it,
-and the fitted rate above (0.738 ns per `V·W²/2`, obtained at `lot_size` 27) reproduces
-at 0.746–0.765 across completely different lot sizes:
+falls roughly quadratically as the lot gets coarser. Re-running the size sweep under
+`--lot-size` confirms it, and the fitted rate above (0.738 ns per `V·W²/2`, obtained at
+`lot_size` 27) reproduces at 0.746–0.765 across completely different lot sizes:
 
 | `lot_size` | W at a 10,000-share parent | p50 decision |
 |---:|---:|---:|
@@ -272,11 +275,12 @@ The calibrator sweeps `router.lot_size` over `[1, 50]` and scores candidates pur
 execution quality — `2·shortfall_edge + slippage_edge + 50·fillrate_edge`, with no term
 for decision latency. Its search space therefore contains configurations whose routing
 decisions take milliseconds: at `lot_size` 5 a 25,000-share parent costs 28 ms to
-decide, and the sweep would happily select it if the fills came out marginally better.
-The calibrated value of 27 is fine, but it is fine by accident.
+decide, and the sweep would select it if the fills came out marginally better. The
+calibrated value of 27 is fine, but it is fine by accident.
 
-Neither issue is fixed here — the point of adding the benchmark was to stop guessing
-about them.
+Both are open. They are stated here rather than left implicit because a benchmark's
+job is to turn an assumption into a number someone can argue with, and these two are
+the arguments the number opens.
 
 ---
 
@@ -377,9 +381,9 @@ concentrates on.
 
 `--no-latency` disables the simulation while leaving the DP's cost function
 untouched. That is the A/B measured in
-[What simulating latency changed](#what-simulating-latency-changed), whose short
-answer is: a real round trip, and no measurable change in execution quality,
-because an uninformed simulator makes staleness symmetric.
+[What the latency model costs](#what-the-latency-model-costs), whose short answer
+is: a real round trip, and no measurable change in execution quality, because an
+uninformed simulator makes staleness symmetric.
 
 ---
 
@@ -437,21 +441,62 @@ Eight threads per trial, spawned and joined fresh each run.
 | [`SimulationEngine`](src/sim/SimulationEngine.cpp) | Drives a virtual clock, market makers, and noise traders |
 | [`MonteCarloHarness`](src/harness/MonteCarloHarness.cpp) | Runs every arm over identical seeded markets |
 
+### Queue sizing
+
+Queue depth is a per-role configuration value, not a global constant. Both ring buffers
+take their capacity at construction, round it up to a power of two, and hold a single
+heap allocation for the lifetime of the object — the mask is computed once, so the hot
+path is still an `& mask` rather than a modulo. `SimConfig::queues` sets each role
+independently:
+
+| Queue | Depth | Carries |
+|---|---:|---|
+| `order_inbox` | 8,192 | Router client inbox, and each venue's inbound request queue |
+| `market_data` | 8,192 | `BookDelta` per venue → the router's mirror books |
+| `fill` | 4,096 | `FillEvent` per venue → router and market makers |
+| `analytics_trade` | 65,536 | Every trade published by every venue |
+| `analytics_order` | 4,096 | Parent order lifecycle events |
+
+The spread is not cosmetic: `analytics_trade` carries every trade three venues publish
+across a whole trial and needs the depth, while a router fill queue drains on a
+dedicated thread and does not. The book's order pool is sized the same way — venues
+start at `venue_order_pool_capacity` (65,536 orders) and the pool doubles on demand, so
+the router's three mirror books, which never carry a real population, cost almost
+nothing.
+
+Together that is **~8.7 MB of ring buffers and ~8.0 MB of order pools per trial**, all
+of it allocated once at construction and none of it touched by an allocator afterwards.
+Trials run one at a time and tear down before the next starts, so that is also the
+ceiling on what a 100-trial run holds at any one moment.
+
 ### Order book design
 
 Real books cluster almost all activity within a few ticks of the touch, so the
 book uses a **256-tick circular ladder of fixed-size price levels around the
 touch, plus a `std::map` overflow region** for everything outside that window.
-Occupancy in the ladder is tracked by a 4-word bitmask, so finding the next
-non-empty level is `__builtin_ctzll` on a 64-bit word rather than a tree walk.
-Orders live in a slab with intrusive prev/next indices, so cancels are O(1)
-unlinks with no allocation.
+Occupancy in the ladder is tracked by a four-word `uint64_t` bitmask, so finding
+the next non-empty level is a `std::countr_zero`/`std::countl_zero` on a 64-bit
+word rather than a tree walk — the standard spelling rather than a GCC builtin, so
+the same source compiles under MSVC and lowers to a bit-scan on all three CI
+compilers. Orders live in a slab with intrusive prev/next indices, so cancels are
+O(1) unlinks with no allocation.
 
 The benchmark above measures both regimes separately and is what justifies the
-split: ladder cancels sustain **1.48×** the throughput of overflow-map cancels
-with non-overlapping ranges across 9 runs, and ladder inserts **1.31×** with
-ranges that do overlap. `bench_lob` prints which of the two it is rather than
-quoting a bare ratio.
+split: **ladder cancels sustain 6.2× the throughput of overflow-map cancels on
+Linux and 9.0× on Windows**, with observed ranges disjoint on both platforms across
+9 runs. Inserts favour the ladder too, but less decisively — 2.9× with disjoint
+ranges on Linux, 1.7× with overlapping ranges on Windows — so cancel is the solid
+result and insert is directional. `bench_lob` prints which of the two a run produced
+rather than quoting a bare ratio.
+
+The book publishes level changes through a
+[`FunctionRef`](include/common/FunctionRef.h) — a non-owning pair of context pointer
+and thunk, assigned once at venue construction. The publish path is a hot one: every
+insert, cancel, and fill that changes a level fires it. A `std::function` there costs
+an allocation and a copy of the callable; the `FunctionRef` is two pointers, trivially
+copyable, with nothing to allocate and nothing to destroy. The venue's callback is a named
+[`BookUpdatePublisher`](include/lob/Venue.h) member rather than a lambda so that the
+referent outlives the book that holds the reference.
 
 ---
 
@@ -469,15 +514,20 @@ The build defaults to `Release` when no build type is given — latency numbers
 from an unoptimised binary are meaningless, so this is deliberate.
 
 ```bash
-./build/high_frequency                  # SOR vs proportional vs naive Monte Carlo comparison
-./build/high_frequency -v               # ...with a per-order report breakdown
-./build/high_frequency --no-latency     # ...with venue latency simulation disabled
-./build/high_frequency --trials 100     # ...over more trials, to shrink run-to-run noise
+./build/high_frequency                   # SOR vs proportional vs naive Monte Carlo comparison
+./build/high_frequency -v                # ...with a per-order report breakdown
+./build/high_frequency --no-latency      # ...with venue latency simulation disabled
+./build/high_frequency --trials 100      # ...over more trials, to shrink run-to-run noise
 ./build/high_frequency --no-proportional # ...SOR vs naive only, for a faster two-arm run
-./build/bench_lob                       # order book microbenchmark
-./build/bench_sor                       # routing decision (DP engine) microbenchmark
-./build/bench_sor --lot-size 100        # ...at a coarser lot size, which shrinks W
-./build/calibrate                       # randomised parameter sweep
+
+./build/bench_lob                        # order book microbenchmark
+./build/bench_sor                        # routing decision (DP engine) microbenchmark
+./build/bench_lob --repeat 25 --pin 3    # ...more repeats, pinned to a specific core
+./build/bench_sor --lot-size 100         # ...at a coarser lot size, which shrinks W
+./build/bench_sor --no-pin               # ...without pinning, if the host forbids it
+
+./build/calibrate                        # randomised parameter sweep
+./build/calibrate --samples 500 --time-budget-minutes 180
 ```
 
 Each writes a timestamped CSV into `results/`. The committed baselines in
@@ -494,7 +544,25 @@ ctest --test-dir build --output-on-failure
 ./build/tests/unit_tests
 ```
 
-The build is warning-clean under `-Wall -Wextra`.
+### CI and static analysis
+
+Every push to `main` and every pull request builds and tests on **Linux/GCC,
+macOS/Clang (arm64), and Windows/MSVC**. The build is warning-clean on all three under
+`-Wall -Wextra -Wpedantic -Wshadow` (`/W4 /permissive-` on MSVC). Three compilers is
+not redundancy for its own sake — it is what keeps the book's bit-scanning portable,
+which is why the ladder occupancy masks are `uint64_t` and every enum has an explicit
+underlying type rather than leaving either to the implementation.
+
+A separate job runs **clang-tidy** over every translation unit in `src/` with
+`--warnings-as-errors='*'`, using the [`.clang-tidy`](.clang-tidy) checkset:
+`bugprone-*`, `performance-*`, and `portability-*`. Layout is fixed by
+[`.clang-format`](.clang-format) (Google base, 4-space indent, 110 columns) so that
+diffs are about behaviour.
+
+```bash
+clang-format -i $(git ls-files '*.cpp' '*.h')
+clang-tidy -p build --warnings-as-errors='*' src/sor/SmartOrderRouter.cpp
+```
 
 ### Sanitizers
 
@@ -502,12 +570,13 @@ The concurrency here is hand-rolled — two lock-free queues, a `shared_mutex`
 guarding the consolidated book, and eight threads per trial — so a passing test
 suite is not by itself evidence that any of it is race-free. CI therefore
 rebuilds the project and the tests under ThreadSanitizer, and separately under
-AddressSanitizer + UndefinedBehaviorSanitizer, runs the full suite under each,
-then runs the integrated eight-thread pipeline on top of that.
+AddressSanitizer + UndefinedBehaviorSanitizer, and under each one runs the full
+suite, then a three-trial eight-thread pipeline, then both microbenchmarks.
 
-**The test suite and a full multi-venue run are clean under ThreadSanitizer — no
-data races and no lock-order inversions reported.** Both are also clean under
-ASan and UBSan, with leak detection enabled.
+**The test suite, a full multi-venue run, and both benchmarks are clean under
+ThreadSanitizer — no data races and no lock-order inversions reported.** All are
+also clean under ASan and UBSan, with leak detection enabled and
+`-fno-sanitize-recover=all`.
 
 ```bash
 cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -519,29 +588,36 @@ ctest --test-dir build-tsan --output-on-failure
 
 ### Calibration
 
-Market and router parameters were not hand-picked. [`calibrate`](src/calibrate/main.cpp)
-runs a randomised sweep over venue fees, latencies, impact coefficients, market
-maker behaviour, and router tuning, scoring each configuration by the resulting
-execution quality. The current [`SimConfig`](src/config/SimConfig.cpp) defaults
-are the output of that search, which is why they are unrounded.
-
-Those defaults were fitted **before** latency was simulated, against a world
-where every order arrived instantly. `router.latency_cost_factor = 3` in
-particular was tuned against a penalty that cost the router nothing, so it is
-now fit to the wrong environment. Re-running the sweep under simulated latency
-is the obvious next step and would likely move it.
+Market and router parameters are not hand-picked. [`calibrate`](src/calibrate/main.cpp)
+runs a randomised sweep over 38 parameters — venue fees, latencies, impact
+coefficients, dark fill ratios, market maker and noise trader behaviour, the price
+process, and router tuning — scoring each configuration by the resulting execution
+quality. The [`SimConfig`](src/config/SimConfig.cpp) defaults are the output of that
+search, which is why they are unrounded.
 
 The sweep runs all three arms and scores candidates by the SOR's edge over the
-**proportional** arm, not the naive one — optimising against the strawman would
-tune the router to beat an opponent nobody fields. The naive edge is still
-computed and written to the sweep CSV, it just does not drive the search. A
-candidate must clear the fill-rate gate on every arm to count as valid, so a
-configuration that quietly breaks one baseline cannot win by default.
+**proportional** arm, not the naive one:
 
-The defaults currently committed predate that change: they were fitted against
-the naive-edge objective, before latency was simulated. Re-running the sweep is
-the obvious next step, and note it now costs ~50% more wall time per sample than
-the numbers `--time-budget-minutes` was tuned against.
+```
+score = 2·shortfall_edge + slippage_edge + 50·fillrate_edge
+```
+
+Optimising against the strawman would tune the router to beat an opponent nobody
+fields. The naive edge is still computed and written to the sweep CSV, it just does
+not drive the search. A candidate must also clear a validity gate — zero dropped
+messages, and a minimum fill rate on *every* arm — so a configuration that quietly
+breaks one baseline cannot win by default.
+
+Picking the best of a few hundred noisy 6-trial samples would select for luck as much
+as for quality, so the search does not stop there. It re-runs its **top five
+candidates at 25 trials on seeds independent of the sweep draw**, keeps the best
+survivor, and then runs a full 25-trial before/after comparison of the committed
+defaults against the winner, printing both arm tables and a paste-ready
+`default_sim_config()` body. A candidate that only looked good on its own seeds gets
+rejected at the re-validation step rather than committed.
+
+> The committed defaults are pending a refresh from a full sweep under the current
+> three-arm objective. The [Results](#results) table will be re-measured with them.
 
 ---
 
@@ -562,13 +638,12 @@ A few things this project deliberately does not claim:
   measures wall-clock submit→completion across eight threads that are spawned
   and joined per trial, on a loaded desktop OS. The SOR's multi-venue split and
   reroute cascade needs more cross-thread round trips than naive's single
-  dispatch, so it looks *slower* on that metric by construction. Since venue
-  latency became a simulated delay it is also dominated by *modelled* wire time
-  — most of the reported figure is the simulator deliberately waiting, not code
-  executing, which is why the numbers jumped roughly 400 µs when the latency
-  model landed. The program prints this caveat itself rather than burying it.
-  `bench_lob` and `bench_sor` are the clean, threading-free latency measurements —
-  the book and the routing decision respectively.
+  dispatch, so it looks *slower* on that metric by construction. It is also
+  dominated by *modelled* wire time: roughly 400 µs of any reported figure is the
+  simulator deliberately waiting out a venue's link time, not code executing. The
+  program prints this caveat itself rather than burying it. `bench_lob` and
+  `bench_sor` are the clean, threading-free latency measurements — the book and
+  the routing decision respectively.
 - **The `max` column in both benchmarks is the operating system, not the code.** On
   this host the timer noise floor — two back-to-back reads with nothing between them
   — itself records a max in the tens to hundreds of microseconds across a 450k-sample
@@ -589,12 +664,18 @@ A few things this project deliberately does not claim:
   a bound rather than a measurement and only its throughput figure is meaningful.
   Every other scenario sits comfortably above the floor. Resolving the fast path
   properly would need batched timing, which trades away the tail percentiles.
-- **The benchmark host is not an isolated machine.** Both baselines were taken on a
-  laptop under a hypervisor, with no `isolcpus`, no fixed frequency governor, and no
-  control over turbo. The thread is pinned and the environment is recorded, but the
-  `max` column — hundreds of microseconds against a sub-100 ns p99 — is OS preemption,
-  not the book. The noise floor's own `max` shows the same spikes, which is how you
-  can tell them apart from real work.
+- **The benchmark host is not an isolated machine.** Every committed baseline was
+  taken on a laptop under a hypervisor, with no `isolcpus`, no fixed frequency
+  governor, and no control over turbo. The thread is pinned and the environment is
+  recorded in the CSV header, but the `max` column — hundreds of microseconds against
+  a sub-100 ns p99 — is OS preemption, not the code. The noise floor's own `max` shows
+  the same spikes, which is how you can tell them apart from real work.
+- **Decision latency is measured but not optimised against.** `bench_sor` prices the
+  routing decision, and it shows a ~3.1 µs floor plus a quadratic term in `W`. The
+  calibrator's objective contains no latency term, so it is free to select a
+  `lot_size` whose decisions cost milliseconds. The two tools do not talk to each
+  other yet, and the committed `lot_size` of 27 is cheap by coincidence rather than
+  by constraint.
 - **The simulator is not a market.** Prices follow geometric Brownian motion,
   market makers quote off a fair value with a volatility-sensitive spread, and
   noise traders arrive as a Poisson process with lognormal sizes. That is enough
