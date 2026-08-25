@@ -28,16 +28,16 @@ have hidden it.
 
 ## Results
 
-100 Monte Carlo trials × 6 parent orders × 3 arms (1,800 executions), with venue
+150 Monte Carlo trials × 6 parent orders × 3 arms (2,700 executions), with venue
 latency simulated. All three arms run against the same seeded market, so the only
 variable is the routing decision. Zero dropped messages.
 
 | Metric | SOR (DP) | Proportional | Naive | vs. Proportional | vs. Naive |
 |---|---:|---:|---:|---:|---:|
-| Implementation shortfall (bps) | **8.84** | 21.90 | 25.79 | **−59.6%** | **−65.7%** |
-| VWAP slippage (bps) | **8.42** | 18.78 | 25.98 | **−55.2%** | **−67.6%** |
-| Fill rate (%) | **97.84** | 91.85 | 91.27 | **+5.99 pp** | **+6.57 pp** |
-| Total fees ($) | **1093.38** | 1659.59 | 1847.44 | **−34.1%** | **−40.8%** |
+| Implementation shortfall (bps) | **5.83** | 18.96 | 22.21 | **−69.3%** | **−73.8%** |
+| VWAP slippage (bps) | **6.40** | 17.12 | 22.97 | **−62.6%** | **−72.1%** |
+| Fill rate (%) | **99.36** | 90.64 | 90.55 | **+8.73 pp** | **+8.81 pp** |
+| Total fees ($) | **1703.89** | 2279.68 | 2610.65 | **−25.3%** | **−34.7%** |
 
 The ordering is the sanity check: proportional sits between the two on every
 metric. It beats naive because splitting by displayed size avoids running one
@@ -45,7 +45,7 @@ venue's book, and it loses to the DP because it cannot see fees, the convexity o
 impact, or the dark pool.
 
 Raw per-order data: [`results/baseline/sor_vs_baselines.csv`](results/baseline/sor_vs_baselines.csv).
-Reproduce with `./high_frequency --trials 100`.
+Reproduce with `./high_frequency --trials 150`.
 
 **On run-to-run stability.** Trial seeds are deterministic (`seed_base + trial`),
 so every run replays an identical market — but the arms still run on eight live
@@ -53,16 +53,18 @@ OS threads, and thread scheduling is not reproducible. Across eight 25-trial run
 (four per latency setting) the SOR's mean shortfall landed anywhere between 4.2
 and 10.6 bps against the *same* seeded markets. That spread is scheduling
 nondeterminism, not sampling
-variation, and it is why the headline table above uses 100 trials rather than 25.
+variation, and it is why the headline table above uses 150 trials rather than 25.
 Read single-run differences smaller than a few bps as noise.
 
-The same nondeterminism shows up in queue pressure. One 100-trial three-arm run
-reported 1,230 dropped messages; an identical re-run on the same seeds reported
-zero, which is the run quoted above. Nothing about the arms changed between them,
-so the drops are host scheduling — the router's market-data thread losing enough
-ground under load to overflow an 8,192-deep ring — not a property of any routing
-strategy. The counters exist so that a run which does drop can be identified and
-discarded rather than quietly averaged in.
+The same nondeterminism shows up in queue pressure. At the queue depths this
+project originally shipped, a 150-trial three-arm run reported 7,268 dropped
+messages while shorter runs on the same seeds reported none — host scheduling
+letting the router's market-data thread lose enough ground under load to overflow
+its ring, not a property of any routing strategy. The depths in
+[`SimConfig`](src/config/SimConfig.cpp) were raised until long runs stopped
+dropping; the run quoted above drops nothing. The counters exist so that a run
+which does drop can be identified and discarded rather than quietly averaged in,
+and any run reported here is one that dropped zero.
 
 ### What the latency model costs
 
@@ -194,7 +196,7 @@ rows above it.
 | 10,000 | 371 | 5,935 | 163.0 µs | 188.7 µs | 219.7 µs | 0.79 |
 | 25,000 | 926 | 993 | 970.9 µs | 1.10 ms | 1.24 ms | 0.75 |
 
-`W = size/lot_size + 1`, at the calibrated `lot_size` of 27. The harness's configured
+`W = size/lot_size + 1`, at the default `lot_size` of 27. The harness's configured
 parent range is 500–10,000 shares, so the first five rows are the sizes the Monte Carlo
 actually routes; 25,000 is there to show where the curve goes.
 
@@ -268,15 +270,16 @@ falls roughly quadratically as the lot gets coarser. Re-running the size sweep u
 | `lot_size` | W at a 10,000-share parent | p50 decision |
 |---:|---:|---:|
 | 100 | 101 | 15.7 µs |
-| 27 (calibrated) | 371 | 163 µs |
+| 27 (default) | 371 | 163 µs |
 | 5 | 2,001 | 4.54 ms |
 
-The calibrator sweeps `router.lot_size` over `[1, 50]` and scores candidates purely on
-execution quality — `2·shortfall_edge + slippage_edge + 50·fillrate_edge`, with no term
-for decision latency. Its search space therefore contains configurations whose routing
-decisions take milliseconds: at `lot_size` 5 a 25,000-share parent costs 28 ms to
-decide, and the sweep would select it if the fills came out marginally better. The
-calibrated value of 27 is fine, but it is fine by accident.
+Nothing in the Monte Carlo scores decision latency. The comparison measures shortfall,
+slippage, fill rate and fees, and would rate a configuration whose routing decisions
+take milliseconds exactly as highly as one that decides in microseconds, provided the
+fills came out the same — at `lot_size` 5 a 25,000-share parent costs 28 ms to decide,
+and no metric in the harness would notice. The default of 27 sits at 163 µs, which is
+comfortable, but that is a property of the value rather than something the measurement
+enforces. The execution harness and the decision benchmark do not talk to each other.
 
 Both are open. They are stated here rather than left implicit because a benchmark's
 job is to turn an assumption into a number someone can argue with, and these two are
@@ -316,6 +319,14 @@ a delay penalty. Fill probability decays exponentially in size:
 p_fill = historical_fill_ratio · exp(−decay_rate · q)
 cost   = p_fill·(fee·q + latency)  +  (1 − p_fill)·(dp_lit[q] + λ·q)
 ```
+
+**The four terms are not comparable in magnitude, and the formula hides that.**
+`half_spread` is in integer ticks while `fee_per_share` is in dollars, so on a
+typical 5,000-share slice the impact term is worth tens of thousands of cost units,
+the spread term roughly ten thousand, the latency term a few hundred, and the fee
+term about two. In practice the DP is an impact-minimising splitter; fees and
+latency break ties rather than drive the allocation. Reading the expression as four
+competing costs overstates what the last two do.
 
 This dark-pool term is the reason lit venues are solved first: `dp_lit` has to
 already exist to price the miss branch.
@@ -451,11 +462,11 @@ independently:
 
 | Queue | Depth | Carries |
 |---|---:|---|
-| `order_inbox` | 8,192 | Router client inbox, and each venue's inbound request queue |
-| `market_data` | 8,192 | `BookDelta` per venue → the router's mirror books |
-| `fill` | 4,096 | `FillEvent` per venue → router and market makers |
-| `analytics_trade` | 65,536 | Every trade published by every venue |
-| `analytics_order` | 4,096 | Parent order lifecycle events |
+| `order_inbox` | 16,384 | Router client inbox, and each venue's inbound request queue |
+| `market_data` | 32,768 | `BookDelta` per venue → the router's mirror books |
+| `fill` | 16,384 | `FillEvent` per venue → router and market makers |
+| `analytics_trade` | 262,144 | Every trade published by every venue |
+| `analytics_order` | 16,384 | Parent order lifecycle events |
 
 The spread is not cosmetic: `analytics_trade` carries every trade three venues publish
 across a whole trial and needs the depth, while a router fill queue drains on a
@@ -464,10 +475,10 @@ start at `venue_order_pool_capacity` (65,536 orders) and the pool doubles on dem
 the router's three mirror books, which never carry a real population, cost almost
 nothing.
 
-Together that is **~8.7 MB of ring buffers and ~8.0 MB of order pools per trial**, all
-of it allocated once at construction and none of it touched by an allocator afterwards.
-Trials run one at a time and tear down before the next starts, so that is also the
-ceiling on what a 100-trial run holds at any one moment.
+Together that is on the order of **30 MB of ring buffers and ~8 MB of order pools per
+trial**, all of it allocated once at construction and none of it touched by an allocator
+afterwards. Trials run one at a time and tear down before the next starts, so that is
+also the ceiling on what a 150-trial run holds at any one moment.
 
 ### Order book design
 
@@ -517,7 +528,9 @@ from an unoptimised binary are meaningless, so this is deliberate.
 ./build/high_frequency                   # SOR vs proportional vs naive Monte Carlo comparison
 ./build/high_frequency -v                # ...with a per-order report breakdown
 ./build/high_frequency --no-latency      # ...with venue latency simulation disabled
-./build/high_frequency --trials 100      # ...over more trials, to shrink run-to-run noise
+./build/high_frequency --trials 150      # ...over more trials, to shrink run-to-run noise
+./build/high_frequency --lot-size 100    # ...at a coarser routing lot size
+./build/high_frequency --seed-base 5000  # ...on an independent set of market seeds
 ./build/high_frequency --no-proportional # ...SOR vs naive only, for a faster two-arm run
 
 ./build/bench_lob                        # order book microbenchmark
@@ -525,9 +538,6 @@ from an unoptimised binary are meaningless, so this is deliberate.
 ./build/bench_lob --repeat 25 --pin 3    # ...more repeats, pinned to a specific core
 ./build/bench_sor --lot-size 100         # ...at a coarser lot size, which shrinks W
 ./build/bench_sor --no-pin               # ...without pinning, if the host forbids it
-
-./build/calibrate                        # randomised parameter sweep
-./build/calibrate --samples 500 --time-budget-minutes 180
 ```
 
 Each writes a timestamped CSV into `results/`. The committed baselines in
@@ -586,41 +596,6 @@ cmake --build build-tsan -j
 ctest --test-dir build-tsan --output-on-failure
 ```
 
-### Calibration
-
-Market and router parameters are not hand-picked. [`calibrate`](src/calibrate/main.cpp)
-runs a randomised sweep over 38 parameters — venue fees, latencies, impact
-coefficients, dark fill ratios, market maker and noise trader behaviour, the price
-process, and router tuning — scoring each configuration by the resulting execution
-quality. The [`SimConfig`](src/config/SimConfig.cpp) defaults are the output of that
-search, which is why they are unrounded.
-
-The sweep runs all three arms and scores candidates by the SOR's edge over the
-**proportional** arm, not the naive one:
-
-```
-score = 2·shortfall_edge + slippage_edge + 50·fillrate_edge
-```
-
-Optimising against the strawman would tune the router to beat an opponent nobody
-fields. The naive edge is still computed and written to the sweep CSV, it just does
-not drive the search. A candidate must also clear a validity gate — zero dropped
-messages, and a minimum fill rate on *every* arm — so a configuration that quietly
-breaks one baseline cannot win by default.
-
-Picking the best of a few hundred noisy 6-trial samples would select for luck as much
-as for quality, so the search does not stop there. It re-runs its **top five
-candidates at 25 trials on seeds independent of the sweep draw**, keeps the best
-survivor, and then runs a full 25-trial before/after comparison of the committed
-defaults against the winner, printing both arm tables and a paste-ready
-`default_sim_config()` body. A candidate that only looked good on its own seeds gets
-rejected at the re-validation step rather than committed.
-
-> The committed defaults are pending a refresh from a full sweep under the current
-> three-arm objective. The [Results](#results) table will be re-measured with them.
-
----
-
 ## Measurement honesty
 
 A few things this project deliberately does not claim:
@@ -671,11 +646,11 @@ A few things this project deliberately does not claim:
   a sub-100 ns p99 — is OS preemption, not the code. The noise floor's own `max` shows
   the same spikes, which is how you can tell them apart from real work.
 - **Decision latency is measured but not optimised against.** `bench_sor` prices the
-  routing decision, and it shows a ~3.1 µs floor plus a quadratic term in `W`. The
-  calibrator's objective contains no latency term, so it is free to select a
-  `lot_size` whose decisions cost milliseconds. The two tools do not talk to each
-  other yet, and the committed `lot_size` of 27 is cheap by coincidence rather than
-  by constraint.
+  routing decision, and it shows a ~3.1 µs floor plus a quadratic term in `W`. None of
+  the execution-quality metrics contain a latency term, so nothing in the Monte Carlo
+  would penalise a `lot_size` whose decisions cost milliseconds. The two tools do not
+  talk to each other, and the committed `lot_size` of 27 is comfortable at 163 µs
+  because of what the value happens to be, not because any measurement constrains it.
 - **The simulator is not a market.** Prices follow geometric Brownian motion,
   market makers quote off a fair value with a volatility-sensitive spread, and
   noise traders arrive as a Poisson process with lognormal sizes. That is enough

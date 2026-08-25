@@ -3,38 +3,38 @@
 SimConfig default_sim_config() {
     SimConfig config;
 
-    config.market.lit_venue_1 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0004265839, .latency_us = 202,
-                                               .impact_coefficient = 6.8286654515, .historical_fill_ratio = 0.0 };
-    config.market.lit_venue_2 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0009485735, .latency_us = 46,
-                                               .impact_coefficient = 4.7917416000, .historical_fill_ratio = 0.0 };
-    config.market.dark_venue = VenueConfig{ .type = VenueType::DARK, .fee_per_share = 0.0000894663, .latency_us = 71,
-                                              .impact_coefficient = 0.0, .historical_fill_ratio = 0.6989994222 };
+    config.market.lit_venue_1 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0004, .latency_us = 200,
+                                               .impact_coefficient = 6.8, .historical_fill_ratio = 0.0 };
+    config.market.lit_venue_2 = VenueConfig{ .type = VenueType::LIT, .fee_per_share = 0.0009, .latency_us = 45,
+                                               .impact_coefficient = 4.8, .historical_fill_ratio = 0.0 };
+    config.market.dark_venue = VenueConfig{ .type = VenueType::DARK, .fee_per_share = 0.0001, .latency_us = 75,
+                                              .impact_coefficient = 0.0, .historical_fill_ratio = 0.70 };
 
-    config.market.mm_lit_venue_1 = MarketMakerConfig{ .base_spread = 10, .spread_sensitivity = 0.8812188427,
-                                                        .quantity_mean = 53, .quantity_variance = 9355.8095284739,
-                                                        .max_orders_per_side = 1000, .stale_distance_ticks = 148 };
-    config.market.mm_lit_venue_2 = MarketMakerConfig{ .base_spread = 1, .spread_sensitivity = 0.5517382395,
-                                                        .quantity_mean = 21, .quantity_variance = 3343.0394462906,
-                                                        .max_orders_per_side = 1000, .stale_distance_ticks = 138 };
-    config.market.mm_dark_venue = MarketMakerConfig{ .base_spread = 11, .spread_sensitivity = 1.0799872399,
-                                                       .quantity_mean = 58, .quantity_variance = 6921.5769478983,
+    config.market.mm_lit_venue_1 = MarketMakerConfig{ .base_spread = 10, .spread_sensitivity = 0.88,
+                                                        .quantity_mean = 50, .quantity_variance = 9000.0,
+                                                        .max_orders_per_side = 1000, .stale_distance_ticks = 150 };
+    config.market.mm_lit_venue_2 = MarketMakerConfig{ .base_spread = 1, .spread_sensitivity = 0.55,
+                                                        .quantity_mean = 20, .quantity_variance = 3300.0,
+                                                        .max_orders_per_side = 1000, .stale_distance_ticks = 140 };
+    config.market.mm_dark_venue = MarketMakerConfig{ .base_spread = 11, .spread_sensitivity = 1.08,
+                                                       .quantity_mean = 60, .quantity_variance = 7000.0,
                                                        .max_orders_per_side = 1000, .stale_distance_ticks = 40 };
 
-    config.market.noise_lit_venue_1 = NoiseTraderConfig{ .arrival_rate = 12.1450868156, .size_mu = 2.0958266771,
-                                                           .size_sigma = 0.3140317357, .trend_sensitivity = 2.8694167210 };
-    config.market.noise_lit_venue_2 = NoiseTraderConfig{ .arrival_rate = 58.2657343948, .size_mu = 4.6301407139,
-                                                           .size_sigma = 0.3418247850, .trend_sensitivity = 3.8248750478 };
+    config.market.noise_lit_venue_1 = NoiseTraderConfig{ .arrival_rate = 12.0, .size_mu = 2.1,
+                                                           .size_sigma = 0.31, .trend_sensitivity = 2.9 };
+    config.market.noise_lit_venue_2 = NoiseTraderConfig{ .arrival_rate = 58.0, .size_mu = 4.6,
+                                                           .size_sigma = 0.34, .trend_sensitivity = 3.8 };
 
     config.market.reference_price = 10'000.0;
-    config.market.price_drift = -0.0040022139;
-    config.market.price_volatility = 0.0179987903;
+    config.market.price_drift = -0.004;
+    config.market.price_volatility = 0.018;
     config.market.price_dt = 0.001;
     config.market.simulate_latency = true;
     config.market.venue_order_pool_capacity = 65'536;
 
     config.router.lot_size = 27;
     config.router.latency_cost_factor = 3;
-    config.router.dark_pool_decay_rate = 0.0001040522;
+    config.router.dark_pool_decay_rate = 0.0001;
     config.router.max_reroute_attempts = 2;
 
     config.harness.num_trials = 25;
@@ -48,8 +48,8 @@ SimConfig default_sim_config() {
     config.harness.seed_base = 1000;
     config.harness.arms = { RoutingStrategy::DP_OPTIMAL, RoutingStrategy::PROPORTIONAL, RoutingStrategy::NAIVE };
 
-    config.queues = QueueSizingConfig{ .order_inbox = 8192, .market_data = 8192, .fill = 4096,
-                                        .analytics_trade = 65'536, .analytics_order = 4096 };
+    config.queues = QueueSizingConfig{ .order_inbox = 16'384, .market_data = 32'768, .fill = 16'384,
+                                        .analytics_trade = 262'144, .analytics_order = 16'384 };
 
     config.verbose_reports = false;
 

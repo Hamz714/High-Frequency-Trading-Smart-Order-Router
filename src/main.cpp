@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -20,6 +21,12 @@ int main(int argc, char** argv) {
             if (trials > 0) config.harness.num_trials = trials;
         } else if (std::strcmp(argv[i], "--no-proportional") == 0) {
             config.harness.arms = { RoutingStrategy::DP_OPTIMAL, RoutingStrategy::NAIVE };
+        } else if (std::strcmp(argv[i], "--lot-size") == 0 && i + 1 < argc) {
+            int64_t lot_size = std::atoll(argv[++i]);
+            if (lot_size > 0) config.router.lot_size = lot_size;
+        } else if (std::strcmp(argv[i], "--seed-base") == 0 && i + 1 < argc) {
+            int seed_base = std::atoi(argv[++i]);
+            if (seed_base > 0) config.harness.seed_base = static_cast<uint32_t>(seed_base);
         }
     }
 

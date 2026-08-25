@@ -23,7 +23,6 @@ list(REMOVE_ITEM CORE_SOURCES
     ${CMAKE_SOURCE_DIR}/src/main.cpp
     ${CMAKE_SOURCE_DIR}/src/bench/bench_lob.cpp
     ${CMAKE_SOURCE_DIR}/src/bench/bench_sor.cpp
-    ${CMAKE_SOURCE_DIR}/src/calibrate/main.cpp
 )
 
 add_library(hft_core STATIC ${CORE_SOURCES})
@@ -41,10 +40,6 @@ target_link_libraries(bench_lob PRIVATE hft_core hft_warnings)
 # Standalone single-threaded routing-decision (DPEngine) microbenchmark
 add_executable(bench_sor src/bench/bench_sor.cpp)
 target_link_libraries(bench_sor PRIVATE hft_core hft_warnings)
-
-# Randomized parameter-sweep calibration tool
-add_executable(calibrate src/calibrate/main.cpp)
-target_link_libraries(calibrate PRIVATE hft_core hft_warnings)
 
 option(BUILD_TESTS "Build unit tests" ON)
 if(BUILD_TESTS)
