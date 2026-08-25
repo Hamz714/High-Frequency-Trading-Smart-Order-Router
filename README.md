@@ -202,11 +202,32 @@ standard spelling rather than a GCC builtin is what lets the same source compile
 and lower to a bit-scan on all three CI compilers. Orders live in a slab with intrusive
 prev/next indices, so cancels are O(1) unlinks with no allocation.
 
+**The window is 256 ticks because that is what keeps it in L1d.** `PriceLevel` is 24 bytes,
+so one side of the ladder is 6 KB and both sides plus their occupancy bitmasks come to
+12.1 KB, about a quarter of the 48 KB of L1d this host gives each core. Sizing the ladder to
+span the whole price range instead of a window around the touch would cost megabytes: 64k
+ticks per side is 3 MB, past L1 and past the 1.25 MB per-core L2, so every level access would
+be an L3 hit at best and a main memory trip at worst. The ladder is indexed on every insert,
+cancel, match, and best-price search, which makes it exactly the structure worth spending the
+L1 budget on.
+
+The occupancy index degrades the same way and worse. At 256 ticks the bitmask is four
+`uint64_t` per side, 32 bytes, half a cache line, and `find_next_best_ask` tests at most those
+four words before falling through to the overflow map. That scan is `O(LADDER_DEPTH/64)`, so a
+64k-tick ladder would make it up to 1,024 word tests spanning 8 KB per side, turning a
+best-price lookup from a few tests inside one cache line into a linear sweep across 128 of
+them. A wider window also makes each re-basing more expensive, since `shift_ask_window` evicts
+and repopulates the range the window moved across. Keeping the window small is what makes both
+the level array and its index cheap; orders far from the touch are rare, so they pay
+`std::map`'s pointer chasing instead.
+
 The benchmark below measures both regions separately, which is what justifies the split:
 ladder cancels sustain 6.2x the throughput of overflow-map cancels on Linux and 9.0x on
 Windows, with observed ranges disjoint on both platforms. Inserts favour the ladder less
 decisively (2.9x on Linux, 1.7x with overlapping ranges on Windows), so cancel is the solid
-result and insert is directional.
+result and insert is directional. That gap is the combined effect of cache residency,
+`std::map`'s pointer chasing, and its `O(log n)` descent; no cache counters were collected, so
+it is not attributable to any one of the three on its own.
 
 Level changes are published through a [`FunctionRef`](include/common/FunctionRef.h), a
 non-owning pair of context pointer and thunk assigned once at venue construction. Every
